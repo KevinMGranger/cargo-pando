@@ -1,7 +1,7 @@
 [package]
 name = "cargo-checkout"
 version = "0.1.0"
-description = "Easily maintain separate working directories, for decoupled testing or other uses."
+description = "Maintain separate working directories for your repo."
 authors = ["Kevin M Granger <git@kevinmgranger.me>"]
 license = "MPL-2.0"
 readme = "README.md"
@@ -12,4 +12,5 @@ status = "experimental"
 
 [dependencies]
 git2 = "0.8.0"
-tempdir = "0.3.7"
+structopt = "0.2.14"
+failure = "0.1.5"

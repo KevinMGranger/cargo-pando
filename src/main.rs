@@ -1,61 +1,123 @@
+use failure::*;
 use git2::build::CheckoutBuilder;
-use git2::{DiffOptions, Repository};
-use std::error::Error;
-use std::fmt::{self, Debug, Display, Formatter};
-use std::process::Command;
-use tempdir::TempDir;
+use git2::Repository;
+use std::fs::create_dir_all;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use structopt::StructOpt;
 
-struct CargoTestErr(i32);
+#[derive(StructOpt, Debug)]
+#[structopt(name = "cargo checkout", author = "")]
+struct Opts {}
 
-impl Debug for CargoTestErr {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        write!(f, "`cargo test` returned {}", self.0)
+/// A checkout is the ref-specific checkout in .git/cargo-checkout
+/// We keep the work dir since getting the parent is easy, and
+/// we don't always use a log file, so we do that lazily.
+struct Checkout {
+    work_dir: PathBuf,
+}
+
+impl Checkout {
+    fn root(&self) -> &Path {
+        self.work_dir.parent().unwrap()
+    }
+
+    fn work_dir(&self) -> &Path {
+        &self.work_dir
     }
 }
 
-impl Display for CargoTestErr {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        Debug::fmt(self, f)
-    }
+/// Where to check out from.
+enum CheckoutSource {
+    Index,
 }
 
-impl Error for CargoTestErr {}
+impl CheckoutSource {
+    // TODO: make this an iterator for multi-checkouts?
+    fn do_checkout(&self, repo: &Repository, checkouts: &Path) -> Result<Vec<Checkout>, Error> {
+        let target = Checkout {
+            work_dir: checkouts.join("index").join("workdir"),
+        };
 
-fn main() -> Result<(), Box<std::error::Error>> {
-    let repo = Repository::open_from_env()?;
-
-    let mut diffopt = DiffOptions::new();
-    diffopt.include_untracked(true);
-
-    let num_changed = repo
-        .diff_index_to_workdir(None, Some(&mut diffopt))?
-        .stats()?
-        .files_changed();
-
-    eprintln!("{} changed files", num_changed);
-    let target_dir = if num_changed > 0 {
-        let tmp = TempDir::new("rust-repo")?.into_path();
+        create_dir_all(target.work_dir()).context("create workdir")?;
 
         let mut ckopt = CheckoutBuilder::new();
-        ckopt.target_dir(&tmp);
+        ckopt.target_dir(target.work_dir());
+        ckopt.recreate_missing(true);
 
-        repo.checkout_index(None, Some(&mut ckopt))?;
+        repo.checkout_index(None, Some(&mut ckopt))
+            .context("index checkout")?;
 
-        tmp
-    } else {
-        repo.workdir().unwrap().to_path_buf()
-    };
-
-    eprintln!("testing in {}", target_dir.display());
-
-    let status = Command::new("cargo")
-        .arg("test")
-        .current_dir(&target_dir)
-        .status()?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(Box::new(CargoTestErr(status.code().unwrap())))
+        Ok(vec![target])
     }
+}
+
+/// What command to run on each checked out directory.
+enum RunCmd {
+    CargoTest,
+}
+
+impl RunCmd {
+    fn run_cmd(&self, dir: &Path) -> Result<Child, Error> {
+        Ok(Command::new("cargo").arg("test").current_dir(dir).spawn()?)
+    }
+}
+
+struct Program {
+    repo: Repository,
+    src: CheckoutSource,
+    run_cmd: RunCmd,
+}
+
+impl Program {
+    fn new(repo: Repository, _opts: Opts) -> Program {
+        Program {
+            repo,
+            // TODO
+            src: CheckoutSource::Index,
+            // TODO
+            run_cmd: RunCmd::CargoTest,
+        }
+    }
+
+    fn run(&self) -> Result<(), Error> {
+        let all_checkouts_dir = self.repo.path().join("cargo-checkout");
+
+        create_dir_all(&all_checkouts_dir).context("creating checkouts dir")?;
+        if !all_checkouts_dir.is_dir() {
+            if all_checkouts_dir.exists() {
+                bail!(
+                    "checkout directory {} exists but is not a directory",
+                    all_checkouts_dir.display()
+                );
+            }
+
+            create_dir_all(&all_checkouts_dir).context("couldn't create checkouts dir")?;
+        }
+
+        let target_dirs = self.src.do_checkout(&self.repo, &all_checkouts_dir)?;
+
+        // TODO: job limiting / parallelism
+        for checkout in target_dirs {
+            self.run_cmd.run_cmd(checkout.work_dir())?.wait()?;
+        }
+
+        Ok(())
+    }
+}
+
+fn main() -> Result<(), Error> {
+    let mut args = std::env::args().collect::<Vec<String>>();
+
+    if args.len() >= 2 {
+        if args[1] == "checkout" {
+            args.remove(1);
+        }
+    }
+
+    let opts = Opts::from_iter(args);
+
+    let program = Program::new(Repository::open_from_env()?, opts);
+
+    program.run()
 }
