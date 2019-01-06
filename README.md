@@ -10,7 +10,7 @@ Check out copies of your repository at any point in one or many alternate direct
 This makes it easy to:
 
 - Test your index while you interactively stage changes, to make sure each commit passes.
-- Create one directory per toolchain version to test all of them at once (in parallel, even (TODO))
+- Create one directory per toolchain version to test all of them at once (in parallel)
 
 # Stability
 
@@ -37,16 +37,21 @@ cargo install --path . --force
 
 # Examples
 
+Test the current index against every toolchain you have installed, aside from the default:
+```bash
+cargo checkout test
+```
+
+Do the above, limiting it to 2 tests at any given time:
+```bash
+cargo checkout test -j 2
+```
+
 Test the current contents of the git index with the default toolchain
 ```bash
 git add foo.rs
 # hmm, is it okay if I just commit that file and leave these other changes here?
-cargo checkout index test
-```
-
-Test the current index against every toolchain you have installed, aside from the default:
-```bash
-cargo checkout toolchains test
+cargo checkout --single test
 ```
 
 # Open Questions
@@ -57,10 +62,8 @@ How does one effectively limit which toolchains to check against? (Current ideas
 
 # TODO
 
-- [ ] verbose output
-- [ ] consider if toolchains should be the default and single checkout should be the exception
+- [ ] consider switching to crossbeam-channel so the git checkout can be concurrent with the rest
 - [ ] passing args to cargo test
 - [ ] general per-dir execution (borrow methodology from `find` `-exec` and `-execdir`)
   - [ ] building a list with -exec will require restructuring how checkouts feed into runcmd
-- [ ] concurrent execution / logging per dir
 - [ ] support checking out any tree (including working dir)
