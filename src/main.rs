@@ -16,7 +16,7 @@ struct Opts {
     /// `toolchains` checks out the current index into one directory per installed toolchain (other than the default) and runs the command, once per directory/toolc
     source: CheckoutSource,
     /// What to run on the code (test|debug)
-    /// 
+    ///
     /// `test` runs cargo test on each checkout, with the applicable toolchain.
     /// `debug` merely lists the contents and prints each directory name.
     action: RunCmd,
@@ -214,10 +214,9 @@ fn get_toolchains() -> Result<Vec<String>, Error> {
 fn main() -> Result<(), Error> {
     let mut args = std::env::args().collect::<Vec<String>>();
 
-    if args.len() >= 2 {
-        if args[1] == "checkout" {
-            args.remove(1);
-        }
+    // handle being invoked as `cargo checkout`
+    if args.len() >= 2 && args[1] == "checkout" {
+        args.remove(1);
     }
 
     let opts = Opts::from_iter(args);
