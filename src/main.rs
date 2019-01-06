@@ -3,6 +3,7 @@ use crossbeam::scope;
 use failure::*;
 use git2::build::CheckoutBuilder;
 use git2::Repository;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use num_cpus;
 use std::fs::{create_dir_all, File};
 use std::path::{Path, PathBuf};
@@ -234,14 +235,62 @@ fn get_toolchains() -> Result<Vec<String>, Error> {
 }
 
 fn main() -> Result<(), Error> {
-    let mut args = std::env::args().collect::<Vec<String>>();
+    // let mut args = std::env::args().collect::<Vec<String>>();
 
-    // handle being invoked as `cargo checkout`
-    if args.len() >= 2 && args[1] == "checkout" {
-        args.remove(1);
-    }
+    // // handle being invoked as `cargo checkout`
+    // if args.len() >= 2 && args[1] == "checkout" {
+    //     args.remove(1);
+    // }
 
-    let opts = Opts::from_iter(args);
+    // let opts = Opts::from_iter(args);
 
-    run(&Repository::open_from_env()?, &opts)
+    // run(&Repository::open_from_env()?, &opts)
+
+    let sleep = |s| std::thread::sleep(std::time::Duration::from_secs(s));
+
+    let format = "{prefix} {pos}/{len} {bar} {msg} {elapsed}";
+
+    let style = ProgressStyle::default_bar().template(format);
+
+    let toolchains = get_toolchains()?;
+    scope(|scope| {
+        let multi = MultiProgress::new();
+
+        // let iter = toolchains
+        //     .iter()
+        //     .map(|tc| {
+        //         let bar = ProgressBar::new(3);
+        //         bar.set_style(style.clone());
+        //         bar.set_prefix(&tc);
+        //         bar.set_message("checking out");
+        //         (tc, multi.add(bar))
+        //     })
+        //     .collect::<Vec<(&String, ProgressBar)>>();
+        //multi.set_move_cursor(true);
+        println!("in between");
+        sleep(2);
+        for toolchain in toolchains {
+            let bar = multi.add(ProgressBar::new(3));
+            bar.set_style(style.clone());
+            bar.set_prefix(&toolchain);
+            bar.set_message("checking out");
+
+            scope.spawn(move |_| {
+                //println!("spawnt a thread for {}", toolchain);
+                bar.tick();
+                sleep(1);
+                bar.inc(1); // 1
+                bar.set_message("building");
+                sleep(3);
+                bar.inc(1); // 2
+                bar.set_message("testing");
+                sleep(2);
+                bar.finish_with_message("status: ");
+            });
+        }
+        multi.join().unwrap();
+    })
+    .unwrap();
+
+    Ok(())
 }
