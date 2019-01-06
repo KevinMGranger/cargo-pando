@@ -1,12 +1,12 @@
+use crossbeam::channel::bounded;
+use crossbeam::scope;
 use failure::*;
 use git2::build::CheckoutBuilder;
 use git2::Repository;
-use rayon::prelude::*;
-use rayon::ThreadPoolBuilder;
+use num_cpus;
 use std::fs::{create_dir_all, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
-use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -44,7 +44,7 @@ impl Checkout {
         } else {
             work_dir.push("index");
         }
-        work_dir.join("workdir");
+        work_dir.push("workdir");
         Checkout {
             work_dir,
             toolchain,
@@ -105,7 +105,36 @@ impl RunCmd {
     }
 }
 
-fn run(repo: &Repository, opts: Opts) -> Result<(), Error> {
+fn run_action(checkout: &Checkout, opts: &Opts) -> Result<ExitStatus, Error> {
+    // TODO: errors should be printed immediately, also simplifies exit
+    let mut cmd = opts.action.create_cmd(&checkout)?;
+
+    if opts.verbose {
+        eprintln!("running {:?} in {}", cmd, checkout.work_dir().display());
+    }
+
+    let status = cmd.status()?;
+
+    if status.success() {
+        println!(
+            "{:?} in {} exited successfully",
+            cmd,
+            checkout.work_dir().display()
+        );
+    } else {
+        println!(
+            "{:?} in {} exited with {}",
+            cmd,
+            checkout.work_dir().display(),
+            status.code().unwrap()
+        );
+    }
+
+    Ok(status)
+}
+
+fn run(repo: &Repository, opts: &Opts) -> Result<(), Error> {
+    let jobs = opts.jobs.unwrap_or_else(num_cpus::get);
     let all_checkouts_dir = repo.path().join("cargo-checkout");
 
     create_dir_all(&all_checkouts_dir).context("creating checkouts dir")?;
@@ -120,88 +149,69 @@ fn run(repo: &Repository, opts: Opts) -> Result<(), Error> {
         create_dir_all(&all_checkouts_dir).context("couldn't create checkouts dir")?;
     }
 
-    let checkouts: Vec<Checkout> = if !opts.single {
-        let toolchains = get_toolchains()?;
-        toolchains
-            .into_iter()
-            .map(|toolchain| Checkout::new(&all_checkouts_dir, Some(toolchain)))
-            .collect()
+    let any_failure = std::sync::atomic::AtomicBool::new(false);
+    scope(|scope| -> Result<(), Error> {
+        let checkouts: Vec<Checkout> = if !opts.single {
+            let toolchains = get_toolchains()?;
+            toolchains
+                .into_iter()
+                .map(|toolchain| Checkout::new(&all_checkouts_dir, Some(toolchain)))
+                .collect()
+        } else {
+            vec![Checkout::new(&all_checkouts_dir, None)]
+        };
+
+        let (sender, recv) = bounded::<Checkout>(checkouts.len());
+
+        let task_count = std::cmp::min(checkouts.len(), jobs);
+
+        for i in 0..task_count {
+            if opts.verbose {
+                eprintln!("spawning worker {}", i);
+            }
+            let my_recv = recv.clone();
+            scope.spawn(|_| {
+                for checkout in my_recv {
+                    let status = run_action(&checkout, opts);
+                    match status {
+                        Ok(status) if !status.success() => {
+                            any_failure.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Err(_) => {
+                            any_failure.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
+
+        for checkout in checkouts {
+            create_dir_all(checkout.work_dir())?;
+
+            let mut ckopt = CheckoutBuilder::new();
+            ckopt.target_dir(checkout.work_dir());
+            ckopt.recreate_missing(true);
+
+            if opts.verbose {
+                eprintln!("checking out into {}", checkout.work_dir().display());
+            }
+
+            repo.checkout_index(None, Some(&mut ckopt))?;
+
+            sender.send(checkout)?;
+        }
+        std::mem::drop(sender);
+
+        Ok(())
+    })
+    .map_err(|_| format_err!("parallelism error"))??;
+
+    if any_failure.into_inner() {
+        bail!("a sub task failed");
     } else {
-        vec![Checkout::new(&all_checkouts_dir, None)]
-    };
-
-    for checkout in &checkouts {
-        create_dir_all(checkout.work_dir())?;
-
-        let mut ckopt = CheckoutBuilder::new();
-        ckopt.target_dir(checkout.work_dir());
-        ckopt.recreate_missing(true);
-
-        if opts.verbose {
-            eprintln!("checking out into {}", checkout.work_dir().display());
-        }
-
-        repo.checkout_index(None, Some(&mut ckopt))?;
+        Ok(())
     }
-
-    if let Some(num) = opts.jobs {
-        ThreadPoolBuilder::new().num_threads(num).build_global()?;
-    }
-
-    let run_cmd = &opts.action;
-    let verbose = opts.verbose;
-
-    let mut statuses = Vec::new();
-    checkouts
-        .par_iter()
-        .map(|checkout| -> Result<ExitStatus, Error> {
-            // TODO: errors should be printed immediately, also simplifies exit
-            let mut cmd = run_cmd.create_cmd(&checkout)?;
-
-            if verbose {
-                eprintln!("running {:?} in {}", cmd, checkout.work_dir().display());
-            }
-
-            let status = cmd.status()?;
-
-            if status.success() {
-                println!(
-                    "{:?} in {} exited successfully",
-                    cmd,
-                    checkout.work_dir().display()
-                );
-            } else {
-                println!(
-                    "{:?} in {} exited with {}",
-                    cmd,
-                    checkout.work_dir().display(),
-                    status.code().unwrap()
-                );
-            }
-
-            Ok(status)
-        })
-        .collect_into_vec(&mut statuses);
-
-    // only exit successfully if all subtasks were successful
-    let mut exit = Ok(());
-    for status in statuses {
-        match status {
-            Ok(status) if !status.success() => {
-                if exit.is_ok() {
-                    exit = Err(format_err!("A command did not exit successfully"));
-                }
-            }
-            Err(err) => {
-                if exit.is_ok() {
-                    exit = Err(err);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    exit
 }
 
 /// Get a list of installed rust toolchains, excluding the current default
@@ -233,5 +243,5 @@ fn main() -> Result<(), Error> {
 
     let opts = Opts::from_iter(args);
 
-    run(&Repository::open_from_env()?, opts)
+    run(&Repository::open_from_env()?, &opts)
 }

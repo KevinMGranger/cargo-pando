@@ -67,7 +67,8 @@ How does one effectively limit which toolchains to check against? (Current ideas
 
 # TODO
 
-- [ ] consider switching to crossbeam-channel so the git checkout can be concurrent with the rest
+- [ ] integrate [indicatif](https://crates.io/crates/indicatif)
+- [ ] consider setting toolcain with environment variable instead for consistency
 - [ ] general per-dir execution (borrow methodology from `find` `-exec` and `-execdir`)
   - [ ] building a list with -exec will require restructuring how checkouts feed into runcmd
 - [ ] support checking out any tree (including working dir)
