@@ -4,11 +4,23 @@ use git2::Repository;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "cargo checkout", author = "")]
-struct Opts {}
+struct Opts {
+    /// How to check out the code. (index|toolchains)
+    ///
+    /// `index` checks out only the current index and runs the command with the default toolchain.
+    /// `toolchains` checks out the current index into one directory per installed toolchain (other than the default) and runs the command, once per directory/toolc
+    source: CheckoutSource,
+    /// What to run on the code (test|debug)
+    /// 
+    /// `test` runs cargo test on each checkout, with the applicable toolchain.
+    /// `debug` merely lists the contents and prints each directory name.
+    action: RunCmd,
+}
 
 /// A checkout is the ref-specific checkout in .git/cargo-checkout
 /// We keep the work dir since getting the parent is easy, and
@@ -30,9 +42,21 @@ impl Checkout {
 }
 
 /// Where to check out from.
+#[derive(Debug)]
 enum CheckoutSource {
     Index,
     Toolchains,
+}
+
+impl FromStr for CheckoutSource {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "index" => CheckoutSource::Index,
+            "toolchains" => CheckoutSource::Toolchains,
+            _ => bail!("unknown checkout source {}", s),
+        })
+    }
 }
 
 impl CheckoutSource {
@@ -86,9 +110,21 @@ impl CheckoutSource {
 }
 
 /// What command to run on each checked out directory.
+#[derive(Debug)]
 enum RunCmd {
     CargoTest,
     Debug,
+}
+
+impl FromStr for RunCmd {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "test" => RunCmd::CargoTest,
+            "debug" => RunCmd::Debug,
+            _ => bail!("unknown action {}", s),
+        })
+    }
 }
 
 impl RunCmd {
@@ -121,13 +157,12 @@ struct Program {
 }
 
 impl Program {
-    fn new(repo: Repository, _opts: Opts) -> Program {
+    fn new(repo: Repository, opts: Opts) -> Program {
         Program {
             repo,
-            // TODO
-            src: CheckoutSource::Toolchains,
-            // TODO
-            run_cmd: RunCmd::CargoTest,
+
+            src: opts.source,
+            run_cmd: opts.action,
         }
     }
 
