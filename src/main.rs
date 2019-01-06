@@ -1,20 +1,21 @@
 use failure::*;
 use git2::build::CheckoutBuilder;
 use git2::Repository;
-use std::fs::create_dir_all;
+use rayon::prelude::*;
+use std::fs::{create_dir_all, File};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Command, ExitStatus};
 use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "cargo checkout", author = "")]
 struct Opts {
-    /// How to check out the code. (index|toolchains)
-    ///
-    /// `index` checks out only the current index and runs the command with the default toolchain.
-    /// `toolchains` checks out the current index into one directory per installed toolchain (other than the default) and runs the command, once per directory/toolc
-    source: CheckoutSource,
+    #[structopt(short = "v", long = "verbose")]
+    verbose: bool,
+    #[structopt(short = "j")]
+    /// How many active tasks should there be at once? Defaults to number of logical CPUs.
+    jobs: Option<usize>,
     /// What to run on the code (test|debug)
     ///
     /// `test` runs cargo test on each checkout, with the applicable toolchain.
@@ -32,6 +33,15 @@ struct Checkout {
 }
 
 impl Checkout {
+    fn new(all_checkouts_dir: &Path, toolchain: String) -> Checkout {
+        Checkout {
+            work_dir: all_checkouts_dir
+                .join(format!("index-{}", &toolchain))
+                .join("workdir"),
+            toolchain: Some(toolchain),
+        }
+    }
+
     // will be used for target moving and/or appending log
     #[allow(dead_code)]
     fn root(&self) -> &Path {
@@ -41,73 +51,9 @@ impl Checkout {
     fn work_dir(&self) -> &Path {
         &self.work_dir
     }
-}
 
-/// Where to check out from.
-#[derive(Debug)]
-enum CheckoutSource {
-    Index,
-    Toolchains,
-}
-
-impl FromStr for CheckoutSource {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "index" => CheckoutSource::Index,
-            "toolchains" => CheckoutSource::Toolchains,
-            _ => bail!("unknown checkout source {}", s),
-        })
-    }
-}
-
-impl CheckoutSource {
-    // TODO: make this an iterator for multi-checkouts?
-    fn do_checkout(&self, repo: &Repository, checkouts: &Path) -> Result<Vec<Checkout>, Error> {
-        match self {
-            CheckoutSource::Index => {
-                let target = Checkout {
-                    work_dir: checkouts.join("index").join("workdir"),
-                    toolchain: None,
-                };
-
-                create_dir_all(target.work_dir()).context("create workdir")?;
-
-                let mut ckopt = CheckoutBuilder::new();
-                ckopt.target_dir(target.work_dir());
-                ckopt.recreate_missing(true);
-
-                repo.checkout_index(None, Some(&mut ckopt))
-                    .context("index checkout")?;
-
-                Ok(vec![target])
-            }
-            CheckoutSource::Toolchains => {
-                let toolchains = get_toolchains()?;
-
-                toolchains
-                    .into_iter()
-                    .map(|toolchain| -> Result<Checkout, Error> {
-                        let target = checkouts
-                            .join(format!("index-{}", &toolchain))
-                            .join("workdir");
-                        create_dir_all(&target)?;
-
-                        let mut ckopt = CheckoutBuilder::new();
-                        ckopt.target_dir(&target);
-                        ckopt.recreate_missing(true);
-
-                        repo.checkout_index(None, Some(&mut ckopt))
-                            .context("index checkout")?;
-
-                        Ok(Checkout {
-                            work_dir: target,
-                            toolchain: Some(toolchain),
-                        })
-                    })
-                    .collect()
-            }
-        }
+    fn log_for(&self, task: &str) -> PathBuf {
+        self.root().join(task)
     }
 }
 
@@ -130,40 +76,41 @@ impl FromStr for RunCmd {
 }
 
 impl RunCmd {
-    fn run_cmd(&self, checkout: &Checkout) -> Result<Child, Error> {
+    fn create_cmd(&self, checkout: &Checkout) -> Result<Command, Error> {
         match self {
             RunCmd::CargoTest => {
                 let mut cmd = Command::new("cargo");
                 if let Some(toolchain) = &checkout.toolchain {
                     cmd.arg(format!("+{}", toolchain));
+
+                    let file = File::create(checkout.log_for("test"))?;
+                    cmd.stdout(file.try_clone()?);
+                    cmd.stderr(file);
                 }
                 cmd.arg("test").current_dir(checkout.work_dir());
-                println!("{:?}", cmd);
-                Ok(cmd.spawn()?)
+                Ok(cmd)
             }
             RunCmd::Debug => {
                 println!("{}:", checkout.work_dir().display());
-                Ok(Command::new("ls")
-                    .arg("-al")
-                    .current_dir(checkout.work_dir())
-                    .spawn()?)
+                let mut cmd = Command::new("ls");
+                cmd.arg("-al").current_dir(checkout.work_dir());
+                Ok(cmd)
             }
         }
     }
 }
 
 struct Program {
+    verbose: bool,
     repo: Repository,
-    src: CheckoutSource,
     run_cmd: RunCmd,
 }
 
 impl Program {
     fn new(repo: Repository, opts: Opts) -> Program {
         Program {
+            verbose: opts.verbose,
             repo,
-
-            src: opts.source,
             run_cmd: opts.action,
         }
     }
@@ -183,14 +130,81 @@ impl Program {
             create_dir_all(&all_checkouts_dir).context("couldn't create checkouts dir")?;
         }
 
-        let target_dirs = self.src.do_checkout(&self.repo, &all_checkouts_dir)?;
+        let toolchains = get_toolchains()?;
 
-        // TODO: job limiting / parallelism
-        for checkout in target_dirs {
-            self.run_cmd.run_cmd(&checkout)?.wait()?;
+        let checkouts = toolchains
+            .into_iter()
+            .map(|toolchain| Checkout::new(&all_checkouts_dir, toolchain))
+            .collect::<Vec<Checkout>>();
+
+        for checkout in &checkouts {
+            create_dir_all(checkout.work_dir())?;
+
+            let mut ckopt = CheckoutBuilder::new();
+            ckopt.target_dir(checkout.work_dir());
+            ckopt.recreate_missing(true);
+
+            if self.verbose {
+                eprintln!("checking out into {}", checkout.work_dir().display());
+            }
+
+            self.repo.checkout_index(None, Some(&mut ckopt))?;
         }
 
-        Ok(())
+        let run_cmd = &self.run_cmd;
+        let verbose = self.verbose;
+
+        let mut statuses = Vec::new();
+        checkouts
+            .par_iter()
+            .map(|checkout| -> Result<ExitStatus, Error> {
+                // TODO: errors should be printed immediately, also simplifies exit
+                let mut cmd = run_cmd.create_cmd(&checkout)?;
+
+                if verbose {
+                    eprintln!("running {:?} in {}", cmd, checkout.work_dir().display());
+                }
+                
+                let status = cmd.status()?;
+
+                if status.success() {
+                    println!(
+                        "{:?} in {} exited successfully",
+                        cmd,
+                        checkout.work_dir().display()
+                    );
+                } else {
+                    println!(
+                        "{:?} in {} exited with {}",
+                        cmd,
+                        checkout.work_dir().display(),
+                        status.code().unwrap()
+                    );
+                }
+
+                Ok(status)
+            })
+            .collect_into_vec(&mut statuses);
+
+        // only exit successfully if all subtasks were successful
+        let mut exit = Ok(());
+        for status in statuses {
+            match status {
+                Ok(status) if !status.success() => {
+                    if exit.is_ok() {
+                        exit = Err(format_err!("A command did not exit successfully"));
+                    }
+                }
+                Err(err) => {
+                    if exit.is_ok() {
+                        exit = Err(err);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        exit
     }
 }
 
