@@ -54,6 +54,11 @@ git add foo.rs
 cargo checkout --single test
 ```
 
+Test each toolchain, but only doc tests:
+```bash
+cargo checkout test -- --doc
+```
+
 # Open Questions
 
 Is `checkout` the best name? Other ideas: `treedo`, `partest` (parallel test), `multido`
@@ -63,7 +68,6 @@ How does one effectively limit which toolchains to check against? (Current ideas
 # TODO
 
 - [ ] consider switching to crossbeam-channel so the git checkout can be concurrent with the rest
-- [ ] passing args to cargo test
 - [ ] general per-dir execution (borrow methodology from `find` `-exec` and `-execdir`)
   - [ ] building a list with -exec will require restructuring how checkouts feed into runcmd
 - [ ] support checking out any tree (including working dir)

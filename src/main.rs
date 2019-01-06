@@ -22,10 +22,8 @@ struct Opts {
     #[structopt(short = "j")]
     /// How many active tasks should there be at once? Defaults to number of logical CPUs.
     jobs: Option<usize>,
-    /// What to run on the code (test|debug)
-    ///
-    /// `test` runs cargo test on each checkout, with the applicable toolchain.
-    /// `debug` merely lists the contents and prints each directory name.
+
+    #[structopt(subcommand)]
     action: RunCmd,
 }
 
@@ -69,27 +67,21 @@ impl Checkout {
 }
 
 /// What command to run on each checked out directory.
-#[derive(Debug)]
+#[derive(StructOpt, Debug)]
+#[structopt(author = "")]
 enum RunCmd {
-    CargoTest,
+    #[structopt(name = "test")]
+    /// runs cargo test on each checkout, with the applicable toolchain.
+    CargoTest { test_args: Vec<String> },
+    #[structopt(name = "debug")]
+    /// lists the contents and prints each directory name.
     Debug,
-}
-
-impl FromStr for RunCmd {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "test" => RunCmd::CargoTest,
-            "debug" => RunCmd::Debug,
-            _ => bail!("unknown action {}", s),
-        })
-    }
 }
 
 impl RunCmd {
     fn create_cmd(&self, checkout: &Checkout) -> Result<Command, Error> {
         match self {
-            RunCmd::CargoTest => {
+            RunCmd::CargoTest { test_args } => {
                 let mut cmd = Command::new("cargo");
                 if let Some(toolchain) = &checkout.toolchain {
                     cmd.arg(format!("+{}", toolchain));
@@ -98,7 +90,9 @@ impl RunCmd {
                     cmd.stdout(file.try_clone()?);
                     cmd.stderr(file);
                 }
-                cmd.arg("test").current_dir(checkout.work_dir());
+                cmd.arg("test")
+                    .args(test_args)
+                    .current_dir(checkout.work_dir());
                 Ok(cmd)
             }
             RunCmd::Debug => {
@@ -111,7 +105,7 @@ impl RunCmd {
     }
 }
 
-fn run(repo: Repository, opts: Opts) -> Result<(), Error> {
+fn run(repo: &Repository, opts: Opts) -> Result<(), Error> {
     let all_checkouts_dir = repo.path().join("cargo-checkout");
 
     create_dir_all(&all_checkouts_dir).context("creating checkouts dir")?;
@@ -239,5 +233,5 @@ fn main() -> Result<(), Error> {
 
     let opts = Opts::from_iter(args);
 
-    run(Repository::open_from_env()?, opts)
+    run(&Repository::open_from_env()?, opts)
 }
