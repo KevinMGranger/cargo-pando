@@ -19,6 +19,36 @@ cause data loss or worse. Only use if you're very comfortable with git and have 
 
 There may also be backwards incompatible changes for each version.
 
+# Installation
+
+Will be easily installable from crates.io once it's more mature.
+
+```bash
+git clone (repo url here)
+cd cargo-checkout
+cargo install --path .
+```
+
+Upgrading
+```bash
+git pull origin master
+cargo install --path . --force
+```
+
+# Examples
+
+Test the current contents of the git index with the default toolchain
+```bash
+git add foo.rs
+# hmm, is it okay if I just commit that file and leave these other changes here?
+cargo checkout index test
+```
+
+Test the current index against every toolchain you have installed, aside from the default:
+```bash
+cargo checkout toolchains test
+```
+
 # Open Questions
 
 Is `checkout` the best name? Other ideas: `treedo`, `partest` (parallel test), `multido`
