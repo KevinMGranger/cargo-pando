@@ -15,6 +15,8 @@ struct Opts {}
 /// we don't always use a log file, so we do that lazily.
 struct Checkout {
     work_dir: PathBuf,
+    /// The toolchain to use on this dir, if applicable
+    toolchain: Option<String>,
 }
 
 impl Checkout {
@@ -30,36 +32,85 @@ impl Checkout {
 /// Where to check out from.
 enum CheckoutSource {
     Index,
+    Toolchains,
 }
 
 impl CheckoutSource {
     // TODO: make this an iterator for multi-checkouts?
     fn do_checkout(&self, repo: &Repository, checkouts: &Path) -> Result<Vec<Checkout>, Error> {
-        let target = Checkout {
-            work_dir: checkouts.join("index").join("workdir"),
-        };
+        match self {
+            CheckoutSource::Index => {
+                let target = Checkout {
+                    work_dir: checkouts.join("index").join("workdir"),
+                    toolchain: None,
+                };
 
-        create_dir_all(target.work_dir()).context("create workdir")?;
+                create_dir_all(target.work_dir()).context("create workdir")?;
 
-        let mut ckopt = CheckoutBuilder::new();
-        ckopt.target_dir(target.work_dir());
-        ckopt.recreate_missing(true);
+                let mut ckopt = CheckoutBuilder::new();
+                ckopt.target_dir(target.work_dir());
+                ckopt.recreate_missing(true);
 
-        repo.checkout_index(None, Some(&mut ckopt))
-            .context("index checkout")?;
+                repo.checkout_index(None, Some(&mut ckopt))
+                    .context("index checkout")?;
 
-        Ok(vec![target])
+                Ok(vec![target])
+            }
+            CheckoutSource::Toolchains => {
+                let toolchains = get_toolchains()?;
+
+                toolchains
+                    .into_iter()
+                    .map(|toolchain| -> Result<Checkout, Error> {
+                        let target = checkouts
+                            .join(format!("index-{}", &toolchain))
+                            .join("workdir");
+                        create_dir_all(&target)?;
+
+                        let mut ckopt = CheckoutBuilder::new();
+                        ckopt.target_dir(&target);
+                        ckopt.recreate_missing(true);
+
+                        repo.checkout_index(None, Some(&mut ckopt))
+                            .context("index checkout")?;
+
+                        Ok(Checkout {
+                            work_dir: target,
+                            toolchain: Some(toolchain),
+                        })
+                    })
+                    .collect()
+            }
+        }
     }
 }
 
 /// What command to run on each checked out directory.
 enum RunCmd {
     CargoTest,
+    Debug,
 }
 
 impl RunCmd {
-    fn run_cmd(&self, dir: &Path) -> Result<Child, Error> {
-        Ok(Command::new("cargo").arg("test").current_dir(dir).spawn()?)
+    fn run_cmd(&self, checkout: &Checkout) -> Result<Child, Error> {
+        match self {
+            RunCmd::CargoTest => {
+                let mut cmd = Command::new("cargo");
+                if let Some(toolchain) = &checkout.toolchain {
+                    cmd.arg(format!("+{}", toolchain));
+                }
+                cmd.arg("test").current_dir(checkout.work_dir());
+                println!("{:?}", cmd);
+                Ok(cmd.spawn()?)
+            }
+            RunCmd::Debug => {
+                println!("{}:", checkout.work_dir().display());
+                Ok(Command::new("ls")
+                    .arg("-al")
+                    .current_dir(checkout.work_dir())
+                    .spawn()?)
+            }
+        }
     }
 }
 
@@ -74,7 +125,7 @@ impl Program {
         Program {
             repo,
             // TODO
-            src: CheckoutSource::Index,
+            src: CheckoutSource::Toolchains,
             // TODO
             run_cmd: RunCmd::CargoTest,
         }
@@ -99,11 +150,30 @@ impl Program {
 
         // TODO: job limiting / parallelism
         for checkout in target_dirs {
-            self.run_cmd.run_cmd(checkout.work_dir())?.wait()?;
+            self.run_cmd.run_cmd(&checkout)?.wait()?;
         }
 
         Ok(())
     }
+}
+
+/// Get a list of installed rust toolchains, excluding the current default
+fn get_toolchains() -> Result<Vec<String>, Error> {
+    let output = Command::new("rustup")
+        .args(&["toolchain", "list"])
+        .output()?;
+
+    if !output.status.success() {
+        bail!("couldn't list toolchains");
+    }
+
+    let output = String::from_utf8(output.stdout)?;
+
+    Ok(output
+        .lines()
+        .filter(|x| !x.ends_with("(default)"))
+        .map(String::from)
+        .collect())
 }
 
 fn main() -> Result<(), Error> {
