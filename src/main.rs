@@ -32,6 +32,8 @@ struct Checkout {
 }
 
 impl Checkout {
+    // will be used for target moving and/or appending log
+    #[allow(dead_code)]
     fn root(&self) -> &Path {
         self.work_dir.parent().unwrap()
     }
