@@ -134,7 +134,7 @@ fn run_action(checkout: &Checkout, opts: &Opts) -> Result<ExitStatus, Error> {
     Ok(status)
 }
 
-fn run(repo: &Repository, opts: &Opts) -> Result<(), Error> {
+fn run(repo: Repository, opts: &Opts) -> Result<(), Error> {
     let jobs = opts.jobs.unwrap_or_else(num_cpus::get);
     let all_checkouts_dir = repo.path().join("cargo-checkout");
 
@@ -162,7 +162,7 @@ fn run(repo: &Repository, opts: &Opts) -> Result<(), Error> {
             vec![Checkout::new(&all_checkouts_dir, None)]
         };
 
-        let (sender, recv) = bounded::<Checkout>(checkouts.len());
+        let (sender, recv) = bounded::<(Checkout, ProgressBar)>(checkouts.len());
 
         let task_count = std::cmp::min(checkouts.len(), jobs);
 
@@ -172,37 +172,69 @@ fn run(repo: &Repository, opts: &Opts) -> Result<(), Error> {
             }
             let my_recv = recv.clone();
             scope.spawn(|_| {
-                for checkout in my_recv {
+                for (checkout, bar) in my_recv {
+                    bar.set_message("testing");
+                    bar.inc(1);
                     let status = run_action(&checkout, opts);
                     match status {
                         Ok(status) if !status.success() => {
+                            bar.finish_with_message(&format!(
+                                "failure: {}",
+                                status.code().unwrap()
+                            ));
                             any_failure.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            bar.finish_with_message(&format!("failure: {}", e));
                             any_failure.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
-                        _ => {}
+                        _ => {
+                            bar.finish_with_message("success");
+                        }
                     }
                 }
             });
         }
 
-        for checkout in checkouts {
-            create_dir_all(checkout.work_dir())?;
+        let multi = MultiProgress::new();
 
-            let mut ckopt = CheckoutBuilder::new();
-            ckopt.target_dir(checkout.work_dir());
-            ckopt.recreate_missing(true);
+        let format = "{prefix} {pos}/{len} {bar} {msg} {elapsed}";
+        let style = ProgressStyle::default_bar().template(format);
 
-            if opts.verbose {
-                eprintln!("checking out into {}", checkout.work_dir().display());
+        let checkouts = checkouts
+            .into_iter()
+            .map(|checkout| {
+                let bar = multi.add(ProgressBar::new(2));
+                bar.set_style(style.clone());
+                bar.set_prefix(checkout.toolchain.as_ref().unwrap());
+                bar.set_message("checking out");
+
+                (checkout, bar)
+            })
+            .collect::<Vec<(Checkout, ProgressBar)>>();
+        
+        scope.spawn(move |_| multi.join().unwrap());
+
+        scope.spawn(move |_| -> Result<(), Error> {
+            for (checkout, bar) in checkouts {
+                bar.tick();
+                create_dir_all(checkout.work_dir())?;
+
+                let mut ckopt = CheckoutBuilder::new();
+                ckopt.target_dir(checkout.work_dir());
+                ckopt.recreate_missing(true);
+
+                if opts.verbose {
+                    eprintln!("checking out into {}", checkout.work_dir().display());
+                }
+
+                repo.checkout_index(None, Some(&mut ckopt))?;
+
+                sender.send((checkout, bar))?;
             }
-
-            repo.checkout_index(None, Some(&mut ckopt))?;
-
-            sender.send(checkout)?;
-        }
-        std::mem::drop(sender);
+            std::mem::drop(sender);
+            Ok(())
+        });
 
         Ok(())
     })
@@ -235,62 +267,14 @@ fn get_toolchains() -> Result<Vec<String>, Error> {
 }
 
 fn main() -> Result<(), Error> {
-    // let mut args = std::env::args().collect::<Vec<String>>();
+    let mut args = std::env::args().collect::<Vec<String>>();
 
-    // // handle being invoked as `cargo checkout`
-    // if args.len() >= 2 && args[1] == "checkout" {
-    //     args.remove(1);
-    // }
+    // handle being invoked as `cargo checkout`
+    if args.len() >= 2 && args[1] == "checkout" {
+        args.remove(1);
+    }
 
-    // let opts = Opts::from_iter(args);
+    let opts = Opts::from_iter(args);
 
-    // run(&Repository::open_from_env()?, &opts)
-
-    let sleep = |s| std::thread::sleep(std::time::Duration::from_secs(s));
-
-    let format = "{prefix} {pos}/{len} {bar} {msg} {elapsed}";
-
-    let style = ProgressStyle::default_bar().template(format);
-
-    let toolchains = get_toolchains()?;
-    scope(|scope| {
-        let multi = MultiProgress::new();
-
-        // let iter = toolchains
-        //     .iter()
-        //     .map(|tc| {
-        //         let bar = ProgressBar::new(3);
-        //         bar.set_style(style.clone());
-        //         bar.set_prefix(&tc);
-        //         bar.set_message("checking out");
-        //         (tc, multi.add(bar))
-        //     })
-        //     .collect::<Vec<(&String, ProgressBar)>>();
-        //multi.set_move_cursor(true);
-        println!("in between");
-        sleep(2);
-        for toolchain in toolchains {
-            let bar = multi.add(ProgressBar::new(3));
-            bar.set_style(style.clone());
-            bar.set_prefix(&toolchain);
-            bar.set_message("checking out");
-
-            scope.spawn(move |_| {
-                //println!("spawnt a thread for {}", toolchain);
-                bar.tick();
-                sleep(1);
-                bar.inc(1); // 1
-                bar.set_message("building");
-                sleep(3);
-                bar.inc(1); // 2
-                bar.set_message("testing");
-                sleep(2);
-                bar.finish_with_message("status: ");
-            });
-        }
-        multi.join().unwrap();
-    })
-    .unwrap();
-
-    Ok(())
+    run(Repository::open_from_env()?, &opts)
 }
