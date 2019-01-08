@@ -65,7 +65,7 @@ version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "cargo-checkout"
+name = "cargo-pando"
 version = "0.1.0"
 dependencies = [
  "console 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",

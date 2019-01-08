@@ -1,11 +1,13 @@
 [package]
-name = "cargo-checkout"
+name = "cargo-pando"
 version = "0.1.0"
-description = "Maintain separate working directories for your repo."
+description = "Perform tasks concurrently over multiple copies of your repo."
 authors = ["Kevin M Granger <git@kevinmgranger.me>"]
 license = "MPL-2.0"
 readme = "README.md"
+repository = "https://github.com/KevinMGranger/cargo-pando"
 edition = "2018"
+categories = ["command-line-utilities", "development-tools", "development-tools::cargo-plugins"]
 
 [badges.maintenance]
 status = "experimental"
