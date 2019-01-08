@@ -1,9 +1,11 @@
-# cargo-pando &emsp; [![Latest Version]][crates.io] [![Rustc Version 1.31+]][rustc]
+# cargo-pando &emsp; [![Latest Version]][crates.io] [![Rustc Version 1.31+]][rustc] [![Build Status]][travis_ci]
 
 [Latest Version]: https://img.shields.io/crates/v/cargo-pando.svg
 [crates.io]: https://crates.io/crates/cargo-pando
 [Rustc Version 1.31+]: https://img.shields.io/badge/rustc-1.31+-lightgray.svg
 [rustc]: https://blog.rust-lang.org/2018/12/06/Rust-1.31-and-rust-2018.html
+[Build Status]: https://travis-ci.com/KevinMGranger/cargo-pando.svg?branch=master
+[travis_ci]: https://travis-ci.com/KevinMGranger/cargo-pando
 
 Perform tasks concurrently over multiple copies of your repo.
 
