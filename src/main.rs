@@ -134,11 +134,8 @@ fn run_action(checkout: &Checkout, opts: &Opts) -> Result<ExitStatus, Error> {
     Ok(status)
 }
 
-fn run(repo: Repository, opts: &Opts) -> Result<(), Error> {
-    let jobs = opts.jobs.unwrap_or_else(num_cpus::get);
-    let all_checkouts_dir = repo.path().join("cargo-checkout");
-
-    create_dir_all(&all_checkouts_dir).context("creating checkouts dir")?;
+fn setup(all_checkouts_dir: &Path) -> Result<(), Error> {
+    create_dir_all(all_checkouts_dir).context("creating checkouts dir")?;
     if !all_checkouts_dir.is_dir() {
         if all_checkouts_dir.exists() {
             bail!(
@@ -149,6 +146,21 @@ fn run(repo: Repository, opts: &Opts) -> Result<(), Error> {
 
         create_dir_all(&all_checkouts_dir).context("couldn't create checkouts dir")?;
     }
+
+    Ok(())
+}
+
+struct Action {
+    checkout: Checkout,
+    progress_bar: ProgressBar,
+    run_cmd: RunCmd,
+}
+
+fn run(repo: Repository, opts: &Opts) -> Result<(), Error> {
+    let jobs = opts.jobs.unwrap_or_else(num_cpus::get);
+    let all_checkouts_dir = repo.path().join("cargo-checkout");
+
+    setup(&all_checkouts_dir)?;
 
     let any_failure = std::sync::atomic::AtomicBool::new(false);
     scope(|scope| -> Result<(), Error> {
@@ -212,7 +224,7 @@ fn run(repo: Repository, opts: &Opts) -> Result<(), Error> {
                 (checkout, bar)
             })
             .collect::<Vec<(Checkout, ProgressBar)>>();
-        
+
         scope.spawn(move |_| multi.join().unwrap());
 
         scope.spawn(move |_| -> Result<(), Error> {
