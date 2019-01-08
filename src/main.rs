@@ -236,8 +236,8 @@ fn get_toolchains() -> Result<Vec<String>, Error> {
 fn main() -> Result<(), Error> {
     let mut args = std::env::args().collect::<Vec<String>>();
 
-    // handle being invoked as `cargo checkout`
-    if args.len() >= 2 && args[1] == "checkout" {
+    // handle being invoked as `cargo pando`
+    if args.len() >= 2 && args[1] == "pando" {
         args.remove(1);
     }
 
