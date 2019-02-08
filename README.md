@@ -48,9 +48,9 @@ Test the working directory against every toolchain you have installed, aside fro
 cargo pando test
 ```
 
-Do the above, limiting it to 2 tests at any given time:
+Do the above, limiting it to 2 `cargo test`s at any given time:
 ```bash
-cargo pando -j 2 test
+cargo pando test -j 2 
 ```
 
 Test each toolchain, but only doc tests:
@@ -60,23 +60,18 @@ cargo pando test -- --doc
 
 # TODO
 
-- [ ] add support for indicatif
-  - [ ] figure out why indicatif is re-printing lines (try doing join immediately after creating all memebrs of the multi)
-- [ ] clean up the whole shebang
-- [ ] document design philosophy
+- [x] add support for indicatif
+- [x] read from travis CI config to determine toolchains to run against
 - [ ] set toolchain with env var before task execution
   - [ ] just refactor task execution in general
 - [ ] support working directory copy
-- [ ] make checkout happen in target instead of .git
-  - [ ] figure out how to get target dir correctly from cargo config
-    - [ ] if there's no cargo api for extensions, then is there a subcommand for reading config?
+- [ ] get target from cargo metadata instead of assuming
 - [ ] refactor checkout source to hide git impls (keep index for now)
-- [ ] have it read from travis CI config to determine toolchains to run against
 - [ ] toolchain selection flags (see what version parsing cargo uses)
-- [ ] invoke subtasks with --message-format=json for better output information
+- [ ] invoke subtasks with --message-format=json for better output information?
 - [ ] determine number of steps for task from dependency list? (means actions will have to run before fully setting up the bars?)
 - [ ] tree selection
-- [ ] improve toolchain list parsing (maybe should be higher on the list)
+- [ ] support allowing failures from travis.yml
 - [ ] add support for other exec targets
   - [ ] print
   - [ ] cargo
@@ -88,3 +83,4 @@ cargo pando test -- --doc
 - [ ] document helpful env vars
 - [ ] consider `do` subsubcommand to make multiple actions easier (use square brackets for separation)
 - [ ] blog post
+- [ ] colorize / emojify output

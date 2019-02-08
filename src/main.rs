@@ -1,247 +1,195 @@
+mod action;
+mod toolchains;
+
+use self::toolchains::get_toolchains_from_travis;
 use crossbeam::channel::bounded;
 use crossbeam::scope;
-use failure::*;
+use crossbeam::thread::ScopedJoinHandle;
+use failure::{bail, format_err, Error, ResultExt};
 use git2::build::CheckoutBuilder;
 use git2::Repository;
-use num_cpus;
-use std::fs::{create_dir_all, File};
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::mem::drop;
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "cargo checkout", author = "")]
+#[structopt(name = "cargo pando", author = "")]
 struct Opts {
-    #[structopt(short = "v", long = "verbose")]
-    /// Print more information about what's happening to stderr.
+    #[structopt(short, long)]
+    /// Be verbose about the tasks run.
     verbose: bool,
-    #[structopt(short = "s", long = "single")]
-    /// Check out just one copy and run the command with the default toolchain.
-    single: bool,
-
-    #[structopt(short = "j")]
-    /// How many active tasks should there be at once? Defaults to number of logical CPUs.
-    jobs: Option<usize>,
-
     #[structopt(subcommand)]
-    action: RunCmd,
+    action: ActionOpt,
 }
 
-/// A checkout is the ref-specific checkout in .git/cargo-checkout
-/// We keep the work dir since getting the parent is easy, and
-/// we don't always use a log file, so we do that lazily.
-struct Checkout {
-    work_dir: PathBuf,
-    /// The toolchain to use on this dir, if applicable
-    toolchain: Option<String>,
-}
-
-impl Checkout {
-    fn new(all_checkouts_dir: &Path, toolchain: Option<String>) -> Checkout {
-        let mut work_dir = all_checkouts_dir.to_path_buf();
-        if let Some(toolchain) = &toolchain {
-            work_dir.push(format!("index-{}", &toolchain));
-        } else {
-            work_dir.push("index");
-        }
-        work_dir.push("workdir");
-        Checkout {
-            work_dir,
-            toolchain,
-        }
-    }
-
-    // will be used for target moving and/or appending log
-    #[allow(dead_code)]
-    fn root(&self) -> &Path {
-        self.work_dir.parent().unwrap()
-    }
-
-    fn work_dir(&self) -> &Path {
-        &self.work_dir
-    }
-
-    fn log_for(&self, task: &str) -> PathBuf {
-        self.root().join(task)
-    }
-}
-
-/// What command to run on each checked out directory.
 #[derive(StructOpt, Debug)]
 #[structopt(author = "")]
-enum RunCmd {
+enum ActionOpt {
     #[structopt(name = "test")]
     /// runs cargo test on each checkout, with the applicable toolchain.
-    CargoTest { test_args: Vec<String> },
-    #[structopt(name = "debug")]
-    /// lists the contents and prints each directory name.
-    Debug,
+    CargoTest {
+        #[structopt(short, long)]
+        /// How many active tasks should there be at once? Defaults to number of logical CPUs.
+        jobs: Option<usize>,
+
+        test_args: Vec<String>,
+    },
 }
 
-impl RunCmd {
-    fn create_cmd(&self, checkout: &Checkout) -> Result<Command, Error> {
-        match self {
-            RunCmd::CargoTest { test_args } => {
-                let mut cmd = Command::new("cargo");
-                if let Some(toolchain) = &checkout.toolchain {
-                    cmd.arg(format!("+{}", toolchain));
+/// A checkout represents a ready-to-go copy of the repository
+/// with relevant metadata (e.g. the toolchain it represents)
+pub struct Checkout {
+    toolchain: String,
+    working_dir: PathBuf,
+    output: PathBuf,
+    progress: ProgressBar,
+    // TODO: allowed to fail?
+}
 
-                    let file = File::create(checkout.log_for("test"))?;
-                    cmd.stdout(file.try_clone()?);
-                    cmd.stderr(file);
-                }
-                cmd.arg("test")
-                    .args(test_args)
-                    .current_dir(checkout.work_dir());
-                Ok(cmd)
-            }
-            RunCmd::Debug => {
-                println!("{}:", checkout.work_dir().display());
-                let mut cmd = Command::new("ls");
-                cmd.arg("-al").current_dir(checkout.work_dir());
-                Ok(cmd)
+/// Determine worker count based on number of intended checkouts,
+/// type of action, job limit specified for the action, and
+/// number of CPU cores.
+// TODO: replace toolchains with some sort of `CheckoutIntent`
+fn worker_count(checkout_count: usize, opt: &Opts) -> usize {
+    if checkout_count == 1 {
+        return 1;
+    }
+
+    match opt.action {
+        ActionOpt::CargoTest { jobs, .. } => {
+            if let Some(job_arg) = jobs {
+                std::cmp::min(job_arg, checkout_count)
+            } else {
+                std::cmp::min(num_cpus::get(), checkout_count)
             }
         }
     }
-}
-
-fn run_action(checkout: &Checkout, opts: &Opts) -> Result<ExitStatus, Error> {
-    // TODO: errors should be printed immediately, also simplifies exit
-    let mut cmd = opts.action.create_cmd(&checkout)?;
-
-    if opts.verbose {
-        eprintln!("running {:?} in {}", cmd, checkout.work_dir().display());
-    }
-
-    let status = cmd.status()?;
-
-    if status.success() {
-        println!(
-            "{:?} in {} exited successfully",
-            cmd,
-            checkout.work_dir().display()
-        );
-    } else {
-        println!(
-            "{:?} in {} exited with {}",
-            cmd,
-            checkout.work_dir().display(),
-            status.code().unwrap()
-        );
-    }
-
-    Ok(status)
-}
-
-fn run(repo: &Repository, opts: &Opts) -> Result<(), Error> {
-    let jobs = opts.jobs.unwrap_or_else(num_cpus::get);
-    let all_checkouts_dir = repo.path().join("cargo-checkout");
-
-    create_dir_all(&all_checkouts_dir).context("creating checkouts dir")?;
-    if !all_checkouts_dir.is_dir() {
-        if all_checkouts_dir.exists() {
-            bail!(
-                "checkout directory {} exists but is not a directory",
-                all_checkouts_dir.display()
-            );
-        }
-
-        create_dir_all(&all_checkouts_dir).context("couldn't create checkouts dir")?;
-    }
-
-    let any_failure = std::sync::atomic::AtomicBool::new(false);
-    scope(|scope| -> Result<(), Error> {
-        let checkouts: Vec<Checkout> = if !opts.single {
-            let toolchains = get_toolchains()?;
-            toolchains
-                .into_iter()
-                .map(|toolchain| Checkout::new(&all_checkouts_dir, Some(toolchain)))
-                .collect()
-        } else {
-            vec![Checkout::new(&all_checkouts_dir, None)]
-        };
-
-        let (sender, recv) = bounded::<Checkout>(checkouts.len());
-
-        let task_count = std::cmp::min(checkouts.len(), jobs);
-
-        for i in 0..task_count {
-            if opts.verbose {
-                eprintln!("spawning worker {}", i);
-            }
-            let my_recv = recv.clone();
-            scope.spawn(|_| {
-                for checkout in my_recv {
-                    let status = run_action(&checkout, opts);
-                    match status {
-                        Ok(status) if !status.success() => {
-                            any_failure.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        Err(_) => {
-                            any_failure.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        _ => {}
-                    }
-                }
-            });
-        }
-
-        for checkout in checkouts {
-            create_dir_all(checkout.work_dir())?;
-
-            let mut ckopt = CheckoutBuilder::new();
-            ckopt.target_dir(checkout.work_dir());
-            ckopt.recreate_missing(true);
-
-            if opts.verbose {
-                eprintln!("checking out into {}", checkout.work_dir().display());
-            }
-
-            repo.checkout_index(None, Some(&mut ckopt))?;
-
-            sender.send(checkout)?;
-        }
-        std::mem::drop(sender);
-
-        Ok(())
-    })
-    .map_err(|_| format_err!("parallelism error"))??;
-
-    if any_failure.into_inner() {
-        bail!("a sub task failed");
-    } else {
-        Ok(())
-    }
-}
-
-/// Get a list of installed rust toolchains, excluding the current default
-fn get_toolchains() -> Result<Vec<String>, Error> {
-    let output = Command::new("rustup")
-        .args(&["toolchain", "list"])
-        .output()?;
-
-    if !output.status.success() {
-        bail!("couldn't list toolchains");
-    }
-
-    let output = String::from_utf8(output.stdout)?;
-
-    Ok(output
-        .lines()
-        .filter(|x| !x.ends_with("(default)"))
-        .map(String::from)
-        .collect())
 }
 
 fn main() -> Result<(), Error> {
-    let mut args = std::env::args().collect::<Vec<String>>();
-
-    // handle being invoked as `cargo pando`
-    if args.len() >= 2 && args[1] == "pando" {
-        args.remove(1);
-    }
+    let args = std::env::args().enumerate().filter_map(|(i, arg)| {
+        // handle being invoked as a cargo subcommand (will have pando passed as arg 1)
+        // as well as on our own (e.g. cargo run in this dir, no extra arg 1)
+        if i == 1 && arg == "pando" {
+            None
+        } else {
+            Some(arg)
+        }
+    });
 
     let opts = Opts::from_iter(args);
 
-    run(&Repository::open_from_env()?, &opts)
+    // let toolchains = get_toolchains()?;
+    let toolchains = get_toolchains_from_travis()?;
+
+    if toolchains.is_empty() {
+        bail!("no toolchains found in travis"); // TODO handle this better. Is this an error condition or just a no-op?
+    } else if opts.verbose {
+        eprintln!("Loaded {} toolchains", toolchains.len())
+    }
+
+    let longest_tchain_name = toolchains.iter().map(String::len).max().unwrap();
+
+    let template = format!(
+        "{{prefix:<{}}} {{pos}}/{{len}} {{bar}} {{elapsed_precise}} {{msg}} ",
+        longest_tchain_name
+    );
+
+    let style: ProgressStyle = ProgressStyle::default_bar().template(&template);
+
+    let multi = MultiProgress::new();
+
+    // TODO: get this from cargo metadata instead
+    let mut all_checkouts = std::env::current_dir()?;
+    all_checkouts.push("target");
+    all_checkouts.push("pando");
+
+    let checkouts = toolchains
+        .into_iter()
+        .map(|toolchain| {
+            // 0: waiting for checkout
+            // 1: checked out, waiting on test
+            // 2: tested
+            // experiemnting with 3 for total time thing
+            let progress = multi.add(ProgressBar::new(3));
+            progress.set_style(style.clone());
+            progress.set_prefix(&toolchain);
+            progress.set_message("waiting to be checked out");
+
+            let checkout = all_checkouts.join(&toolchain);
+
+            Checkout {
+                toolchain,
+                working_dir: checkout.join("working_dir"),
+                output: checkout.join("output"),
+                progress: progress.into(),
+            }
+        })
+        .collect::<Vec<Checkout>>();
+
+    let multi_handle = std::thread::spawn(move || {
+        multi.join().unwrap();
+    });
+
+    let worker_count = worker_count(checkouts.len(), &opts);
+    eprintln!("worker count: {}", worker_count);
+
+    let result = scope(|scope| -> Result<bool, Error> {
+        let (tx, rx) = bounded::<&Checkout>(checkouts.len());
+
+        let worker_handles = (0..worker_count)
+            .map(|i| {
+                let rx = rx.clone();
+                scope
+                    .builder()
+                    .name(format!("worker {}", i))
+                    .spawn(move |scope| -> bool {
+                        rx.iter()
+                            .map(|checkout| action::run_cmd(scope, &checkout))
+                            .fold(true, |x, y| x && y)
+                    })
+                    .with_context(|_| format!("failed to spawn worker {}", i))
+            })
+            .collect::<Result<Vec<ScopedJoinHandle<'_, bool>>, _>>()?;
+
+        let repo = Repository::open_from_env().unwrap();
+
+        let mut checkout_success = true;
+        for checkout in &checkouts {
+            checkout.progress.set_message("checking out");
+            //std::fs::create_dir_all(&checkout.working_dir)?;
+            let mut ckopt = CheckoutBuilder::new();
+            ckopt.target_dir(&checkout.working_dir);
+            ckopt.recreate_missing(true);
+
+            if let Err(e) = repo.checkout_index(None, Some(&mut ckopt)) {
+                checkout
+                    .progress
+                    .set_message(&format!("checkout error: {}", e));
+                checkout_success = false;
+            } else {
+                checkout
+                    .progress
+                    .set_message("checked out, waiting on available worker");
+                tx.send(checkout).unwrap();
+            }
+        }
+        drop(tx);
+
+        Ok(checkout_success
+            && worker_handles
+                .into_iter()
+                .map(|x| x.join().unwrap())
+                .fold(true, |x, y| x && y))
+    })
+    .map_err(|_| format_err!("panicked"))??;
+
+    multi_handle.join().unwrap();
+
+    if !result {
+        std::process::exit(1);
+    } else {
+        Ok(())
+    }
 }
