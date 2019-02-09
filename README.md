@@ -11,7 +11,8 @@ Perform tasks concurrently over multiple copies of your repo.
 
 Example use cases:
 
-- test your code against multiple rust relases in parallel
+- test your code against multiple rust releases in parallel
+- test the index / stage of your repo to validate incremental changes
 - test all commits in a given range in parallel to bisect a bug (TODO)
 - do both of the above at the same time (TODO)
 - run some other custom command across any of the above checkouts (TODO)
@@ -41,33 +42,51 @@ git pull origin master
 cargo install --path . --force
 ```
 
+# How it Works
+
+1. Figure out what toolchains to run against, either from the CLI, `.travis.yml`, or just using all the installed ones.
+2. Create a copy of the repo's code in `target/pando` _per toolchain_, e.g. `target/pando/1.31.0`. __Note that this is destructive.__
+3. Run `cargo +TOOLCHAIN_HERE test` or some other action in each copy of the repo.
+   For example, `cargo +1.31.0 test` in `target/pando/1.31.0/working_dir`.
+
+Output is logged to `target/pando/TOOLCHAIN_HERE/output`.
+
 # Examples
 
-Test the working directory against every toolchain you have installed, aside from the default:
+See `cargo pando help` for more details.
+
+Test the working directory against the toolchains listed in `.travis.yml`:
 ```bash
 cargo pando test
 ```
 
-Do the above, limiting it to 2 `cargo test`s at any given time:
+Test against every installed toolchain except the default, limiting it to 2 `cargo test`s at any given time:
 ```bash
-cargo pando test -j 2 
+cargo pando --all test -j 2 
 ```
 
-Test each toolchain, but only doc tests:
+Test each specified toolchain, but only doc tests:
 ```bash
-cargo pando test -- --doc
+cargo pando -t stable -t beta test -- --doc
+```
+
+## Git
+
+Test the given toolchain against the _index_ (stage) of your repo.
+Useful if you're incrementally adding changes to a commit and you want to check that your work in progress still works.
+```bash
+cargo pando --index -t stable test
 ```
 
 # TODO
 
 - [x] add support for indicatif
 - [x] read from travis CI config to determine toolchains to run against
-- [ ] set toolchain with env var before task execution
-  - [ ] just refactor task execution in general
-- [ ] support working directory copy
+- [x] support working directory copy
 - [ ] get target from cargo metadata instead of assuming
 - [ ] refactor checkout source to hide git impls (keep index for now)
-- [ ] toolchain selection flags (see what version parsing cargo uses)
+- [x] toolchain selection flags
+  - [ ] fancier ones?
 - [ ] invoke subtasks with --message-format=json for better output information?
 - [ ] determine number of steps for task from dependency list? (means actions will have to run before fully setting up the bars?)
 - [ ] tree selection
@@ -78,9 +97,9 @@ cargo pando test -- --doc
   - [ ] build
   - [ ] cmdeach / cmdall
   - [ ] shelleach / shellall
-- [ ] decide if common toolchain selection stuff should be part of the subcommand or the larger command
 - [ ] document using cargo aliases to help with common sub-commands
 - [ ] document helpful env vars
-- [ ] consider `do` subsubcommand to make multiple actions easier (use square brackets for separation)
+- [ ] consider `do` subsubcommand to make multiple actions easier (use square brackets for separation?)
+- [ ] tmux integration (might have to refactor when output is created, etc.)
 - [ ] blog post
 - [ ] colorize / emojify output

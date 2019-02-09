@@ -120,9 +120,11 @@ where
         for (i, file) in src.iter().enumerate() {
             checkout.progress.set_message(&copying_message(i));
             if let Err(e) = do_copy(file, &checkout.working_dir) {
-                checkout
-                    .progress
-                    .finish_with_message(&format!("error copying {}", file.0.display()));
+                checkout.progress.finish_with_message(&format!(
+                    "error copying {}: {}",
+                    file.0.display(),
+                    e
+                ));
                 all_successful = false;
                 continue 'checkouts;
             }
