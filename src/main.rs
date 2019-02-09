@@ -1,4 +1,6 @@
 mod action;
+mod copy;
+mod git;
 mod toolchains;
 
 use self::toolchains::get_toolchains_from_travis;
@@ -11,6 +13,7 @@ use git2::Repository;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::mem::drop;
 use std::path::PathBuf;
+use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -19,8 +22,48 @@ struct Opts {
     #[structopt(short, long)]
     /// Be verbose about the tasks run.
     verbose: bool,
+
+    /// checkout the index
+    #[structopt(short, long, conflicts_with = "copy", conflicts_with = "no_copy")]
+    index: bool,
+
+    /// copy the working dir
+    #[structopt(short, long)]
+    copy: bool,
+
+    /// don't copy
+    #[structopt(long)]
+    no_copy: bool,
+
+    /// which toolchains to test against. Reads from .travis.yml by default
+    #[structopt(short, long)]
+    toolchain: Vec<String>,
+
+    /// test against all installed toolchains
+    #[structopt(short, long, conflicts_with = "toolchain")]
+    all: bool,
+
     #[structopt(subcommand)]
     action: ActionOpt,
+}
+
+enum CheckoutSource {
+    Copy,
+    Index,
+    None,
+}
+
+impl From<&Opts> for CheckoutSource {
+    fn from(opts: &Opts) -> Self {
+        // TODO: panic when invariants are violated
+        if opts.index {
+            CheckoutSource::Index
+        } else if opts.no_copy {
+            CheckoutSource::None
+        } else {
+            CheckoutSource::Copy
+        }
+    }
 }
 
 #[derive(StructOpt, Debug)]
@@ -112,10 +155,10 @@ fn main() -> Result<(), Error> {
             // 1: checked out, waiting on test
             // 2: tested
             // experiemnting with 3 for total time thing
-            let progress = multi.add(ProgressBar::new(3));
+            let progress = multi.add(ProgressBar::new(2));
             progress.set_style(style.clone());
             progress.set_prefix(&toolchain);
-            progress.set_message("waiting to be checked out");
+            progress.set_message("waiting to be copied");
 
             let checkout = all_checkouts.join(&toolchain);
 
@@ -133,7 +176,6 @@ fn main() -> Result<(), Error> {
     });
 
     let worker_count = worker_count(checkouts.len(), &opts);
-    eprintln!("worker count: {}", worker_count);
 
     let result = scope(|scope| -> Result<bool, Error> {
         let (tx, rx) = bounded::<&Checkout>(checkouts.len());
@@ -153,29 +195,18 @@ fn main() -> Result<(), Error> {
             })
             .collect::<Result<Vec<ScopedJoinHandle<'_, bool>>, _>>()?;
 
-        let repo = Repository::open_from_env().unwrap();
-
-        let mut checkout_success = true;
-        for checkout in &checkouts {
-            checkout.progress.set_message("checking out");
-            //std::fs::create_dir_all(&checkout.working_dir)?;
-            let mut ckopt = CheckoutBuilder::new();
-            ckopt.target_dir(&checkout.working_dir);
-            ckopt.recreate_missing(true);
-
-            if let Err(e) = repo.checkout_index(None, Some(&mut ckopt)) {
-                checkout
-                    .progress
-                    .set_message(&format!("checkout error: {}", e));
-                checkout_success = false;
-            } else {
-                checkout
-                    .progress
-                    .set_message("checked out, waiting on available worker");
-                tx.send(checkout).unwrap();
+        let checkout_success = match CheckoutSource::from(&opts) {
+            CheckoutSource::Index => git::checkout_index(&checkouts, tx),
+            CheckoutSource::Copy => copy::copy_repo(&checkouts, tx),
+            CheckoutSource::None => {
+                for checkout in &checkouts {
+                    // TODO: message
+                    tx.send(checkout).unwrap();
+                }
+                drop(tx);
+                Ok(true)
             }
-        }
-        drop(tx);
+        }?;
 
         Ok(checkout_success
             && worker_handles
