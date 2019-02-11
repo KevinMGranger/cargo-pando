@@ -89,6 +89,7 @@ fn run_cmd_inner<'scope, 'env: 'scope>(
 
     for line in lines_rx {
         file.write_all(line.as_bytes())?;
+        file.write_all(b"\n")?;
     }
 
     Ok(child.wait()?)
