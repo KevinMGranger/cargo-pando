@@ -161,9 +161,9 @@ impl Program {
             .map(|toolchain| {
                 // 0: waiting for checkout
                 // 1: checked out, waiting on test
-                // 2: tested
-                // experiemnting with 3 for total time thing
-                let progress = multi.add(ProgressBar::new(2));
+                // 2: testing
+                // 3: done
+                let progress = multi.add(ProgressBar::new(3));
                 progress.set_style(style.clone());
                 progress.set_prefix(&toolchain);
                 progress.set_message("waiting to be copied");
