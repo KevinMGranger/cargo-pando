@@ -1,8 +1,10 @@
 mod action;
+mod cli;
 mod copy;
 mod git;
 mod toolchains;
 
+use cli::{ActionOpt, Opts};
 use crossbeam::channel::bounded;
 use crossbeam::scope;
 use crossbeam::thread::ScopedJoinHandle;
@@ -11,43 +13,6 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::mem::drop;
 use std::path::PathBuf;
 use structopt::StructOpt;
-
-#[derive(StructOpt, Debug)]
-#[structopt(name = "cargo pando", author = "")]
-struct Opts {
-    /// Check out the index of your repository.
-    ///
-    /// Mutually exclusive with --copy and --no-copy.
-    #[structopt(short, long, conflicts_with = "copy", conflicts_with = "no_copy")]
-    index: bool,
-
-    /// Copy src and Cargo.{toml,lock} against each toolchain.
-    ///
-    /// Mutually exclusive with --index and --no-copy.
-    #[structopt(short, long)]
-    copy: bool,
-
-    /// Don't copy any files, use the existing ones in target/pando.
-    ///
-    /// Mutually exclusive with --index and --copy.
-    #[structopt(long)]
-    no_copy: bool,
-
-    /// Specify one or many toolchains to use. Reads from .travis.yml if unused.
-    ///
-    /// Mutually exclusive with --all.
-    #[structopt(short, long, number_of_values = 1)]
-    toolchain: Vec<String>,
-
-    /// Use all installed toolchains except for the current default.
-    ///
-    /// Mutually exclusive with --toolchain.
-    #[structopt(short, long, conflicts_with = "toolchain")]
-    all: bool,
-
-    #[structopt(subcommand)]
-    action: ActionOpt,
-}
 
 // the parsed-and-proper program obtained from the structopt Opts.
 struct Program {
@@ -88,29 +53,6 @@ impl std::fmt::Display for CheckoutSource {
             CheckoutSource::Copy => write!(f, "Copying current directory"),
             CheckoutSource::Index => write!(f, "Checking out index"),
             CheckoutSource::None => write!(f, "Using existing checkouts"),
-        }
-    }
-}
-
-#[derive(StructOpt, Debug)]
-#[structopt(author = "")]
-enum ActionOpt {
-    #[structopt(name = "test")]
-    /// Runs cargo test on each checkout, with the applicable toolchain.
-    CargoTest {
-        #[structopt(short, long)]
-        /// How many active tasks should there be at once? Defaults to number of logical CPUs.
-        jobs: Option<usize>,
-
-        /// Arguments passed along to cargo test.
-        test_args: Vec<String>,
-    },
-}
-
-impl ActionOpt {
-    fn job_count(&self) -> Option<usize> {
-        match self {
-            ActionOpt::CargoTest { jobs, .. } => jobs.clone(),
         }
     }
 }
