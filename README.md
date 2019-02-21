@@ -80,26 +80,21 @@ cargo pando --index -t stable test
 
 # TODO
 
-- [x] add support for indicatif
-- [x] read from travis CI config to determine toolchains to run against
-- [x] support working directory copy
+## 1.0
 - [ ] get target from cargo metadata instead of assuming
-- [ ] refactor checkout source to hide git impls (keep index for now)
-- [x] toolchain selection flags
-  - [ ] fancier ones?
-- [ ] invoke subtasks with --message-format=json for better output information?
-- [ ] determine number of steps for task from dependency list? (means actions will have to run before fully setting up the bars?)
-- [ ] tree selection
-- [ ] support allowing failures from travis.yml
 - [ ] add support for other exec targets
-  - [ ] print
+  - [ ] print / print0
   - [ ] cargo
   - [ ] build
-  - [ ] cmdeach / cmdall
-  - [ ] shelleach / shellall
+  - [ ] cmdeach ~~/ cmdall~~ (have it print and consume it via shell / xargs!)
+- [ ] figure out what the earliest compatible rust version is
 - [ ] document using cargo aliases to help with common sub-commands
 - [ ] document helpful env vars
-- [ ] consider `do` subsubcommand to make multiple actions easier (use square brackets for separation?)
-- [ ] tmux integration (might have to refactor when output is created, etc.)
 - [ ] blog post
+
+## Next
+- [ ] invoke subtasks with --message-format=json for better output information?
+- [ ] determine number of steps for task from dependency list?
+- [ ] support allowing failures from travis.yml
+- [ ] tmux integration (might have to refactor when output is created, etc.)
 - [ ] colorize / emojify output
