@@ -128,14 +128,10 @@ impl Program {
         // Determine worker count based on number of intended checkouts,
         // type of action, job limit specified for the action, and
         // number of CPU cores.
-        let worker_count = if checkouts.len() == 1 {
-            1
-        } else {
-            std::cmp::min(
-                checkouts.len(),
-                action.job_count().unwrap_or_else(num_cpus::get),
-            )
-        };
+        let worker_count = std::cmp::min(
+            checkouts.len(),
+            action.job_count().unwrap_or_else(num_cpus::get),
+        );
 
         eprintln!("Using {} workers. {}.", worker_count, checkout_source);
 

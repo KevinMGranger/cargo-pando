@@ -44,7 +44,6 @@ fn make_an_each_command(
 
 fn command_from_action(toolchain: &str, action: &ActionOpt) -> Option<Command> {
     let (install, cargo, replacements, util, args) = match action {
-        ActionOpt::All { .. } => return None,
         ActionOpt::CargoTest {
             install,
             test_args: args,
@@ -67,6 +66,7 @@ fn command_from_action(toolchain: &str, action: &ActionOpt) -> Option<Command> {
             args,
             ..
         } => (install, false, true, util.as_str(), args),
+        _ => unimplemented!()
     };
 
     Some(make_an_each_command(

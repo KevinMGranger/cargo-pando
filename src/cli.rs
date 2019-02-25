@@ -104,22 +104,19 @@ pub enum ActionOpt {
         args: Vec<String>,
     },
 
-    /// Execute the given command once for _all_ checkouts.
-    /// Will not switch to a specific checkout.
-    ///
-    /// Any argument named ``{}`` will be replaced by multiple arguments of each toolchain version.
-    #[structopt(name = "all")]
-    All { utility: String, args: Vec<String> },
+    /// Copy and do nothing but print the full path of each checkout, one per line.
+    #[structopt(name="print")]
+    Print,
 }
 
 impl ActionOpt {
     pub fn job_count(&self) -> Option<usize> {
         match self {
-            ActionOpt::All { .. } => Some(1),
             ActionOpt::Each { jobs, .. } => jobs.clone(),
             ActionOpt::CargoTest { jobs, .. } => jobs.clone(),
             ActionOpt::CargoBuild { jobs, .. } => jobs.clone(),
-            ActionOpt::CargoAny { jobs, .. } => jobs.clone()
+            ActionOpt::CargoAny { jobs, .. } => jobs.clone(),
+            _ => None
         }
     }
 }
