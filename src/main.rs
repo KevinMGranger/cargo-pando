@@ -95,9 +95,7 @@ impl Program {
 
         let multi = MultiProgress::new();
 
-        // TODO: get this from cargo metadata instead
-        let mut all_checkouts = std::env::current_dir()?;
-        all_checkouts.push("target");
+        let mut all_checkouts = PathBuf::from(cargo::get_cargo_metadata().target_directory);
         all_checkouts.push("pando");
 
         let checkouts = toolchains
