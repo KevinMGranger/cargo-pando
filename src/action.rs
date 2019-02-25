@@ -29,13 +29,13 @@ fn make_an_each_command(
 
     cmd.arg(utility);
     if replacements {
-        cmd.args(args.into_iter().map(|x| {
-            if x.as_ref() == "{}" {
-                <str as AsRef<OsStr>>::as_ref(toolchain)
+        for arg in args {
+            if arg.as_ref() == "{}" {
+                cmd.arg(toolchain);
             } else {
-                x.as_ref()
+                cmd.arg(arg);
             }
-        }));
+        }
     } else {
         cmd.args(args);
     }
@@ -126,7 +126,8 @@ fn run_cmd_inner<'scope, 'env: 'scope>(
     checkout.progress.inc(1);
     checkout.progress.set_message("testing");
 
-    let mut cmd = action.make_command(&checkout.toolchain);
+    let mut cmd = command_from_action(&checkout.toolchain, action).unwrap(); // TODO: handle all
+    //action.make_command(&checkout.toolchain);
 
     let mut child = cmd
         .current_dir(&checkout.working_dir)

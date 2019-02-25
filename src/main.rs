@@ -1,9 +1,11 @@
 mod action;
+mod cargo;
 mod cli;
 mod copy;
 mod git;
 mod toolchains;
 
+use action::run_cmd;
 use cli::{ActionOpt, Opts};
 use crossbeam::channel::bounded;
 use crossbeam::scope;
@@ -142,6 +144,7 @@ impl Program {
         let result = scope(|scope| -> Result<bool, Error> {
             let (tx, rx) = bounded::<&Checkout>(checkouts.len());
 
+            let actn = &action;
             // spawn workers
             let worker_handles = (0..worker_count)
                 .map(|i| {
@@ -151,7 +154,7 @@ impl Program {
                         .name(format!("worker {}", i))
                         .spawn(move |scope| -> bool {
                             rx.iter()
-                                .map(|checkout| action::run_cmd(scope, &checkout))
+                                .map(|checkout| run_cmd(scope, &checkout, actn))
                                 .fold(true, |x, y| x && y)
                         })
                         .with_context(|_| format!("failed to spawn worker {}", i))

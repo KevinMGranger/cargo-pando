@@ -7,34 +7,34 @@ pub struct Opts {
     ///
     /// Mutually exclusive with --copy and --no-copy.
     #[structopt(short, long, conflicts_with = "copy", conflicts_with = "no_copy")]
-    index: bool,
+    pub index: bool,
 
     /// Copy src and Cargo.{toml,lock} against each toolchain.
     ///
     /// Mutually exclusive with --index and --no-copy.
     #[structopt(short, long)]
-    copy: bool,
+    pub copy: bool,
 
     /// Don't copy any files, use the existing ones in target/pando.
     ///
     /// Mutually exclusive with --index and --copy.
     #[structopt(long)]
-    no_copy: bool,
+    pub no_copy: bool,
 
     /// Specify one or many toolchains to use. Reads from .travis.yml if unused.
     ///
     /// Mutually exclusive with --all.
     #[structopt(short, long, number_of_values = 1)]
-    toolchain: Vec<String>,
+    pub toolchain: Vec<String>,
 
     /// Use all installed toolchains except for the current default.
     ///
     /// Mutually exclusive with --toolchain.
     #[structopt(short, long, conflicts_with = "toolchain")]
-    all: bool,
+    pub all: bool,
 
     #[structopt(subcommand)]
-    action: ActionOpt,
+    pub action: ActionOpt,
 }
 
 #[derive(StructOpt, Debug)]
@@ -110,4 +110,16 @@ pub enum ActionOpt {
     /// Any argument named ``{}`` will be replaced by multiple arguments of each toolchain version.
     #[structopt(name = "all")]
     All { utility: String, args: Vec<String> },
+}
+
+impl ActionOpt {
+    pub fn job_count(&self) -> Option<usize> {
+        match self {
+            ActionOpt::All { .. } => Some(1),
+            ActionOpt::Each { jobs, .. } => jobs.clone(),
+            ActionOpt::CargoTest { jobs, .. } => jobs.clone(),
+            ActionOpt::CargoBuild { jobs, .. } => jobs.clone(),
+            ActionOpt::CargoAny { jobs, .. } => jobs.clone()
+        }
+    }
 }
