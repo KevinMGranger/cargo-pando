@@ -46,25 +46,25 @@ fn command_from_action(toolchain: &str, action: &ActionOpt) -> Option<Command> {
     let (install, cargo, replacements, util, args) = match action {
         ActionOpt::All { .. } => return None,
         ActionOpt::CargoTest {
-            install: install,
+            install,
             test_args: args,
             ..
         } => (install, true, false, "test", args),
         ActionOpt::CargoBuild {
-            install: install,
+            install,
             build_args: args,
             ..
         } => (install, true, false, "build", args),
         ActionOpt::CargoAny {
-            install: install,
+            install,
             subcommand: util,
-            args: args,
+            args,
             ..
         } => (install, true, false, util.as_str(), args),
         ActionOpt::Each {
-            install: install,
+            install,
             utility: util,
-            args: args,
+            args,
             ..
         } => (install, false, true, util.as_str(), args),
     };
