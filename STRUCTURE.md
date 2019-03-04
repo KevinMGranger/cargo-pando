@@ -17,10 +17,9 @@
 - get toolchains
 - find target dir
 
-- create opaque progress report type?
-
 - optionally spawn workers
   - empty worker handle vec is still foldable with true default
+- make closure for reporting a finished checkout
   
 - do checkouts
   - send checkout to opaque handler type

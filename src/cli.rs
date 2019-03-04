@@ -105,7 +105,7 @@ pub enum ActionOpt {
     },
 
     /// Copy and do nothing but print the full path of each checkout, one per line.
-    #[structopt(name="print")]
+    #[structopt(name = "print")]
     Print,
 }
 
@@ -116,7 +116,21 @@ impl ActionOpt {
             ActionOpt::CargoTest { jobs, .. } => jobs.clone(),
             ActionOpt::CargoBuild { jobs, .. } => jobs.clone(),
             ActionOpt::CargoAny { jobs, .. } => jobs.clone(),
-            _ => None
+            ActionOpt::Print => Some(0),
+        }
+    }
+
+    pub fn uses_progress_bars(&self) -> bool {
+        match self {
+            ActionOpt::Print => false,
+            _ => true,
+        }
+    }
+
+    pub fn uses_workers(&self) -> bool {
+        match self {
+            ActionOpt::Print => false,
+            _ => true,
         }
     }
 }

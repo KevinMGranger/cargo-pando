@@ -6,6 +6,7 @@ mod git;
 mod toolchains;
 
 use action::run_cmd;
+use cargo::CargoMetadata;
 use cli::{ActionOpt, Opts};
 use crossbeam::channel::bounded;
 use crossbeam::scope;
@@ -21,6 +22,7 @@ struct Program {
     toolchains: Vec<String>,
     checkout_source: CheckoutSource,
     action: ActionOpt,
+    cargo_metadata: CargoMetadata,
 }
 
 fn opts_to_program(opts: Opts) -> Result<Program, Error> {
@@ -40,6 +42,7 @@ fn opts_to_program(opts: Opts) -> Result<Program, Error> {
             CheckoutSource::Copy
         },
         action: opts.action,
+        cargo_metadata: cargo::get_cargo_metadata(),
     })
 }
 
@@ -71,74 +74,90 @@ pub struct Checkout {
 
 impl Program {
     fn run(self) -> Result<(), Error> {
-        let Program {
-            toolchains,
-            checkout_source,
-            action,
-        } = self;
-
-        if toolchains.is_empty() {
+        if self.toolchains.is_empty() {
             bail!("no toolchains found");
         }
 
-        // set up progress bars and determine what checkouts will happen
-        let style = {
-            let longest_tchain_name = toolchains.iter().map(String::len).max().unwrap();
+        let all_checkouts = PathBuf::from(&self.cargo_metadata.target_directory).join("pando");
 
-            let template = format!(
-                "{{prefix:<{}}} {{pos}}/{{len}} {{bar}} {{elapsed_precise}} {{msg}} ",
-                longest_tchain_name
-            );
+        let (checkouts, maybe_multi_handle) = if !self.action.uses_progress_bars() {
+            unimplemented!()
+            // (
+            //     self.toolchains
+            //         .into_iter()
+            //         .map(|toolchain| {
+            //             let checkout = all_checkouts.join(&toolchain);
 
-            ProgressStyle::default_bar().template(&template)
+            //             Checkout {
+            //                 toolchain,
+            //                 working_dir: checkout.join("working_dir"),
+            //                 output: checkout.join("output"),
+            //                 progress: None,
+            //             }
+            //         })
+            //         .collect::<Vec<Checkout>>(),
+            //     None,
+            // )
+        } else {
+            // set up progress bars and determine what checkouts will happen
+            let style = {
+                let longest_tchain_name = self.toolchains.iter().map(String::len).max().unwrap();
+
+                let template = format!(
+                    "{{prefix:<{}}} {{pos}}/{{len}} {{bar}} {{elapsed_precise}} {{msg}} ",
+                    longest_tchain_name
+                );
+
+                ProgressStyle::default_bar().template(&template)
+            };
+
+            let multi = MultiProgress::new();
+
+            let checkouts = self
+                .toolchains
+                .iter().cloned()
+                .map(|toolchain| {
+                    // 0: waiting for checkout
+                    // 1: checked out, waiting on test
+                    // 2: testing
+                    // 3: done
+                    let progress = multi.add(ProgressBar::new(3));
+                    progress.set_style(style.clone());
+                    progress.set_prefix(&toolchain);
+                    progress.set_message("waiting to be copied");
+
+                    let checkout = all_checkouts.join(&toolchain);
+
+                    Checkout {
+                        toolchain,
+                        working_dir: checkout.join("working_dir"),
+                        output: checkout.join("output"),
+                        progress: progress.into(),
+                    }
+                })
+                .collect::<Vec<Checkout>>();
+
+            let multi_handle = std::thread::spawn(move || {
+                multi.join().unwrap();
+            });
+
+            (checkouts, Some(multi_handle))
         };
-
-        let multi = MultiProgress::new();
-
-        let mut all_checkouts = PathBuf::from(cargo::get_cargo_metadata().target_directory);
-        all_checkouts.push("pando");
-
-        let checkouts = toolchains
-            .into_iter()
-            .map(|toolchain| {
-                // 0: waiting for checkout
-                // 1: checked out, waiting on test
-                // 2: testing
-                // 3: done
-                let progress = multi.add(ProgressBar::new(3));
-                progress.set_style(style.clone());
-                progress.set_prefix(&toolchain);
-                progress.set_message("waiting to be copied");
-
-                let checkout = all_checkouts.join(&toolchain);
-
-                Checkout {
-                    toolchain,
-                    working_dir: checkout.join("working_dir"),
-                    output: checkout.join("output"),
-                    progress: progress.into(),
-                }
-            })
-            .collect::<Vec<Checkout>>();
-
-        let multi_handle = std::thread::spawn(move || {
-            multi.join().unwrap();
-        });
 
         // Determine worker count based on number of intended checkouts,
         // type of action, job limit specified for the action, and
         // number of CPU cores.
         let worker_count = std::cmp::min(
             checkouts.len(),
-            action.job_count().unwrap_or_else(num_cpus::get),
+            self.action.job_count().unwrap_or_else(num_cpus::get),
         );
 
-        eprintln!("Using {} workers. {}.", worker_count, checkout_source);
+        eprintln!("Using {} workers. {}.", worker_count, self.checkout_source);
 
         let result = scope(|scope| -> Result<bool, Error> {
             let (tx, rx) = bounded::<&Checkout>(checkouts.len());
 
-            let actn = &action;
+            let actn = &self.action;
             // spawn workers
             let worker_handles = (0..worker_count)
                 .map(|i| {
@@ -156,7 +175,7 @@ impl Program {
                 .collect::<Result<Vec<ScopedJoinHandle<'_, bool>>, _>>()?;
 
             // do checkout and send to workers
-            let checkout_success = match checkout_source {
+            let checkout_success = match self.checkout_source {
                 CheckoutSource::Index => git::checkout_index(&checkouts, tx),
                 CheckoutSource::Copy => copy::copy_repo(&checkouts, tx),
                 CheckoutSource::None => {
@@ -177,7 +196,7 @@ impl Program {
         })
         .map_err(|_| format_err!("panicked"))??;
 
-        multi_handle.join().unwrap();
+        maybe_multi_handle.map(|x| x.join().unwrap());
 
         if !result {
             std::process::exit(1);
