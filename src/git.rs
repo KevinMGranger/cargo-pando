@@ -1,12 +1,11 @@
 use super::Checkout;
-use crossbeam::channel::Sender;
 use failure::Error;
 use git2::build::CheckoutBuilder;
 use git2::Repository;
 
 pub fn checkout_index<'checkout, I>(
     checkouts: I,
-    worker_queue: Sender<&'checkout Checkout>,
+    mut finished_callback: impl FnMut(&'checkout Checkout),
 ) -> Result<bool, Error>
 where
     I: IntoIterator<Item = &'checkout Checkout>,
@@ -31,7 +30,7 @@ where
                 .progress
                 .set_message("checked out, waiting on available worker");
             checkout.progress.inc(1);
-            worker_queue.send(checkout).unwrap();
+            finished_callback(checkout);
         }
     }
 

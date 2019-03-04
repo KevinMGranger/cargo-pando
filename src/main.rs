@@ -14,7 +14,7 @@ use crossbeam::thread::ScopedJoinHandle;
 use failure::{bail, format_err, Error, ResultExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::mem::drop;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 // the parsed-and-proper program obtained from the structopt Opts.
@@ -52,6 +52,26 @@ enum CheckoutSource {
     None,
 }
 
+impl CheckoutSource {
+    fn do_checkout<'checkout>(
+        &self,
+        checkouts: impl IntoIterator<Item = &'checkout Checkout>,
+        mut finished_callback: impl FnMut(&'checkout Checkout),
+    ) -> Result<bool, Error> {
+        match self {
+            CheckoutSource::Index => git::checkout_index(checkouts, finished_callback),
+            CheckoutSource::Copy => copy::copy_repo(checkouts, finished_callback),
+            CheckoutSource::None => {
+                for checkout in checkouts {
+                    finished_callback(checkout);
+                }
+                drop(finished_callback);
+                Ok(true)
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for CheckoutSource {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -78,28 +98,7 @@ impl Program {
             bail!("no toolchains found");
         }
 
-        let all_checkouts = PathBuf::from(&self.cargo_metadata.target_directory).join("pando");
-
-        let (checkouts, maybe_multi_handle) = if !self.action.uses_progress_bars() {
-            unimplemented!()
-            // (
-            //     self.toolchains
-            //         .into_iter()
-            //         .map(|toolchain| {
-            //             let checkout = all_checkouts.join(&toolchain);
-
-            //             Checkout {
-            //                 toolchain,
-            //                 working_dir: checkout.join("working_dir"),
-            //                 output: checkout.join("output"),
-            //                 progress: None,
-            //             }
-            //         })
-            //         .collect::<Vec<Checkout>>(),
-            //     None,
-            // )
-        } else {
-            // set up progress bars and determine what checkouts will happen
+        let (checkouts, multi_handle) = {
             let style = {
                 let longest_tchain_name = self.toolchains.iter().map(String::len).max().unwrap();
 
@@ -113,9 +112,16 @@ impl Program {
 
             let multi = MultiProgress::new();
 
+            if !self.action.uses_progress_bars() {
+                multi.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+            }
+
+            let all_checkouts = Path::new(&self.cargo_metadata.target_directory).join("pando");
+
             let checkouts = self
                 .toolchains
-                .iter().cloned()
+                .iter()
+                .cloned()
                 .map(|toolchain| {
                     // 0: waiting for checkout
                     // 1: checked out, waiting on test
@@ -141,64 +147,58 @@ impl Program {
                 multi.join().unwrap();
             });
 
-            (checkouts, Some(multi_handle))
+            (checkouts, multi_handle)
         };
 
-        // Determine worker count based on number of intended checkouts,
-        // type of action, job limit specified for the action, and
-        // number of CPU cores.
-        let worker_count = std::cmp::min(
-            checkouts.len(),
-            self.action.job_count().unwrap_or_else(num_cpus::get),
-        );
+        let success = if !self.action.uses_workers() {
+            let print_checkout_name = |checkout: &Checkout| println!("{}", checkout.toolchain);
+            self.checkout_source.do_checkout(&checkouts, print_checkout_name)?
+        } else {
+            // Determine worker count based on number of intended checkouts,
+            // type of action, job limit specified for the action, and
+            // number of CPU cores.
+            let worker_count = std::cmp::min(
+                checkouts.len(),
+                self.action.job_count().unwrap_or_else(num_cpus::get),
+            );
 
-        eprintln!("Using {} workers. {}.", worker_count, self.checkout_source);
+            eprintln!("Using {} workers. {}.", worker_count, self.checkout_source);
 
-        let result = scope(|scope| -> Result<bool, Error> {
-            let (tx, rx) = bounded::<&Checkout>(checkouts.len());
+            scope(|scope| -> Result<bool, Error> {
+                let (tx, rx) = bounded::<&Checkout>(checkouts.len());
 
-            let actn = &self.action;
-            // spawn workers
-            let worker_handles = (0..worker_count)
-                .map(|i| {
-                    let rx = rx.clone();
-                    scope
-                        .builder()
-                        .name(format!("worker {}", i))
-                        .spawn(move |scope| -> bool {
-                            rx.iter()
-                                .map(|checkout| run_cmd(scope, &checkout, actn))
-                                .fold(true, |x, y| x && y)
-                        })
-                        .with_context(|_| format!("failed to spawn worker {}", i))
-                })
-                .collect::<Result<Vec<ScopedJoinHandle<'_, bool>>, _>>()?;
+                let actn = &self.action;
+                // spawn workers
+                let worker_handles = (0..worker_count)
+                    .map(|i| {
+                        let rx = rx.clone();
+                        scope
+                            .builder()
+                            .name(format!("worker {}", i))
+                            .spawn(move |scope| -> bool {
+                                rx.iter()
+                                    .map(|checkout| run_cmd(scope, &checkout, actn))
+                                    .fold(true, |x, y| x && y)
+                            })
+                            .with_context(|_| format!("failed to spawn worker {}", i))
+                    })
+                    .collect::<Result<Vec<ScopedJoinHandle<'_, bool>>, _>>()?;
 
-            // do checkout and send to workers
-            let checkout_success = match self.checkout_source {
-                CheckoutSource::Index => git::checkout_index(&checkouts, tx),
-                CheckoutSource::Copy => copy::copy_repo(&checkouts, tx),
-                CheckoutSource::None => {
-                    for checkout in &checkouts {
-                        // TODO: message
-                        tx.send(checkout).unwrap();
-                    }
-                    drop(tx);
-                    Ok(true)
-                }
-            }?;
+                // do checkout and send to workers
+                let checkout_success = self.checkout_source.do_checkout(&checkouts, move |checkout| tx.send(checkout).unwrap())?;
 
-            Ok(checkout_success
-                && worker_handles
-                    .into_iter()
-                    .map(|x| x.join().unwrap())
-                    .fold(true, |x, y| x && y))
-        })
-        .map_err(|_| format_err!("panicked"))??;
+                Ok(checkout_success
+                    && worker_handles
+                        .into_iter()
+                        .map(|x| x.join().unwrap())
+                        .fold(true, |x, y| x && y))
+            })
+            .map_err(|_| format_err!("panicked"))??
+        };
 
-        maybe_multi_handle.map(|x| x.join().unwrap());
+        multi_handle.join().unwrap();
 
-        if !result {
+        if !success {
             std::process::exit(1);
         } else {
             Ok(())

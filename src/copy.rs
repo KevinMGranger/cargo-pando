@@ -1,5 +1,4 @@
 use super::Checkout;
-use crossbeam::channel::Sender;
 use failure::{Error, ResultExt};
 use std::fs::{copy, create_dir, remove_dir_all, remove_file, Metadata};
 use std::io;
@@ -99,7 +98,7 @@ fn do_copy((src, meta): &(PathBuf, Metadata), target_dir: &Path) -> io::Result<(
 
 pub fn copy_repo<'checkout, I>(
     checkouts: I,
-    worker_queue: Sender<&'checkout Checkout>,
+    mut finished_callback: impl FnMut(&'checkout Checkout)
 ) -> Result<bool, Error>
 where
     I: IntoIterator<Item = &'checkout Checkout>,
@@ -133,7 +132,7 @@ where
             .progress
             .set_message("copied, waiting on available worker");
         checkout.progress.inc(1);
-        worker_queue.send(checkout).unwrap();
+        finished_callback(checkout);
     }
 
     Ok(all_successful)
