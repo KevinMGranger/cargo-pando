@@ -151,8 +151,12 @@ impl Program {
         };
 
         let success = if !self.action.uses_workers() {
-            let print_checkout_name = |checkout: &Checkout| println!("{}", checkout.toolchain);
-            self.checkout_source.do_checkout(&checkouts, print_checkout_name)?
+            let print_checkout_name = |checkout: &Checkout| {
+                println!("{}", checkout.toolchain);
+                checkout.progress.finish();
+            };
+            self.checkout_source
+                .do_checkout(&checkouts, print_checkout_name)?
         } else {
             // Determine worker count based on number of intended checkouts,
             // type of action, job limit specified for the action, and
@@ -185,7 +189,9 @@ impl Program {
                     .collect::<Result<Vec<ScopedJoinHandle<'_, bool>>, _>>()?;
 
                 // do checkout and send to workers
-                let checkout_success = self.checkout_source.do_checkout(&checkouts, move |checkout| tx.send(checkout).unwrap())?;
+                let checkout_success = self
+                    .checkout_source
+                    .do_checkout(&checkouts, move |checkout| tx.send(checkout).unwrap())?;
 
                 Ok(checkout_success
                     && worker_handles
