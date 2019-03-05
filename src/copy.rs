@@ -1,3 +1,4 @@
+//! Create multiple checkouts of a repo by copying applicable files.
 use super::Checkout;
 use failure::{Error, ResultExt};
 use std::fs::{copy, create_dir, remove_dir_all, remove_file, Metadata};
@@ -96,6 +97,9 @@ fn do_copy((src, meta): &(PathBuf, Metadata), target_dir: &Path) -> io::Result<(
     Ok(())
 }
 
+/// Copy over all applicable files into each checkout.
+/// 
+/// The finished_callback is called once for each checkout fully copied.
 pub fn copy_repo<'checkout, I>(
     checkouts: I,
     mut finished_callback: impl FnMut(&'checkout Checkout)

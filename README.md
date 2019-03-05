@@ -9,9 +9,7 @@
 
 Perform tasks concurrently over multiple copies of your repo.
 
-Example use cases:
-
-- test your code against multiple rust releases in parallel
+- test your code against multiple rust releases in parallel with a snazzy progress bar
 - test the index / stage of your repo to validate incremental changes
 - do both of the above at the same time
 - run some other custom command across any of the above checkouts
@@ -45,10 +43,20 @@ cargo install --path . --force
 
 1. Figure out what toolchains to run against, either from the CLI, `.travis.yml`, or just using all the installed ones.
 2. Create a copy of the repo's code in `target/pando` _per toolchain_, e.g. `target/pando/1.31.0`. __Note that this is destructive.__
-3. Run `cargo +TOOLCHAIN_HERE test` or some other action in each copy of the repo.
-   For example, `cargo +1.31.0 test` in `target/pando/1.31.0/working_dir`.
+    _The configured target dir in your cargo config is respected._
+3. Run `rustup run TOOLCHAIN_HERE cargo test` or some other action in each copy of the repo-- in parallel.
+    For example, `cargo +1.31.0 test` in `target/pando/1.31.0/working_dir`.
 
-Output is logged to `target/pando/TOOLCHAIN_HERE/output`.
+Output is logged to `target/pando/TOOLCHAIN_HERE/output`, and each line is printed next to the progress bar for the checkout.
+
+## Caveats
+
+If your tests rely on external resources, keep in mind they won't be in the expected location.
+
+If there are exclusive resources, you'll have to synchronize access yourself.
+
+More parallelism doesn't always make things faster, especially since compilation
+can be IO intensive as well as CPU intensive.
 
 # Examples
 
@@ -59,7 +67,8 @@ Test the working directory against the toolchains listed in `.travis.yml`:
 cargo pando test
 ```
 
-Test against every installed toolchain except the default, limiting it to 2 `cargo test`s at any given time:
+Test against every installed toolchain except the default,
+limiting it to 2 `cargo test`s at any given time:
 ```bash
 cargo pando --all test -j 2 
 ```
@@ -67,6 +76,24 @@ cargo pando --all test -j 2
 Test each specified toolchain, but only doc tests:
 ```bash
 cargo pando -t stable -t beta test -- --doc
+```
+
+If you want to run a single command across all of the checkouts at once,
+use print, cut, and xargs:
+```bash
+cargo pando print | cut -f 2 | xargs ls
+```
+
+Run an arbitrary command against each checkout,
+substituting the name of the toolchain where applicable:
+```bash
+cargo pando each echo the toolchain '{}' has been copied
+```
+
+If the command does not lend itself well to the single line given
+by the progress bars, xargs can help again:
+```bash
+cargo pando print | cut -f 1 | xargs -L 1 -P 2 echo the toolchain is
 ```
 
 ## Git
@@ -77,6 +104,14 @@ Useful if you're incrementally adding changes to a commit and you want to check 
 cargo pando --index -t stable test
 ```
 
+# Bugs / Open Questions
+
+- How can we know what files need to be copied over?
+- How can we know when / what files to delete from checkouts?
+- How can we tell the canonical name of a toolchain, to not
+    duplicate between their travis representation
+    and the --all representation?
+
 # TODO
 
 ## 0.3
@@ -86,8 +121,8 @@ cargo pando --index -t stable test
   - [x] cargo
   - [x] build
   - [x] cmdeach ~~/ cmdall~~ (have it print and consume it via shell / xargs!)
-    - [ ] document that
-- [ ] heck, document everything
+    - [x] document that
+- [x] heck, document everything
 - [ ] document using cargo aliases to help with common sub-commands
 - [ ] document helpful env vars
 
@@ -100,12 +135,12 @@ cargo pando --index -t stable test
 ## 1.0
 - [ ] blog post
 - [ ] pointing progress bars to stdout
+- [ ] answer: would one ever need more than Cargo files, test, and src? (build.rs maybe, and then more?)
 
 ## Next
 - [ ] invoke subtasks with --message-format=json for better output information?
 - [ ] determine number of steps for task from dependency list?
 - [ ] colorize / emojify output
-- [ ] print0?
 
 ## Maybe?
 - [ ] tmux integration (might have to refactor when output is created, etc.)
@@ -113,3 +148,4 @@ cargo pando --index -t stable test
   - [ ] Docker?
   - [ ] Can we arbitrarily support this? Might not be worth it.
 - [ ] vastly cleaning up actions
+- [ ] make print take args to select field deliniation (whitespace, null, ASCII tabular)

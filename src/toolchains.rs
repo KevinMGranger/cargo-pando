@@ -1,3 +1,4 @@
+//! Various toolchain list sources.
 pub use self::travis::get_toolchains_from_travis;
 
 use failure::{bail, Error, ResultExt};
@@ -15,6 +16,12 @@ mod travis {
         rust: Vec<String>,
     }
 
+    /// Get all of the toolchains listed in `.travis.yml`.
+    /// 
+    /// # Failures
+    /// 
+    /// If `.travis.yml` is missing, doesn't match the expected structure,
+    /// or the language isn't `rust`, there will be an error.
     pub fn get_toolchains_from_travis() -> Result<Vec<String>, Error> {
         let cwd = std::env::current_dir()
             .context("could not determine current dir when trying to open travis")?;
@@ -29,7 +36,6 @@ mod travis {
 
 }
 
-#[allow(dead_code)] // will be used for future toolchain selection code
 /// Get a list of installed rust toolchains, excluding the current default
 pub fn get_installed_toolchains() -> Result<Vec<String>, Error> {
     let output = Command::new("rustup")

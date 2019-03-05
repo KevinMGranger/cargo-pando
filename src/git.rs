@@ -1,8 +1,10 @@
+//! Checkout the index/stage once for each toolchain.
 use super::Checkout;
 use failure::Error;
 use git2::build::CheckoutBuilder;
 use git2::Repository;
 
+/// Checkout the index/stage once for each toolchain.
 pub fn checkout_index<'checkout, I>(
     checkouts: I,
     mut finished_callback: impl FnMut(&'checkout Checkout),

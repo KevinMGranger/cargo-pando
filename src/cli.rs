@@ -1,5 +1,13 @@
 use ::structopt::StructOpt;
 
+/// Perform tasks concurrently over multiple copies of your repo.
+/// 
+/// See the help for the various subcommands for details.
+/// 
+/// Note that there is no subcommand to execute _one_ command with each checkout.
+/// For that, use print, cut and xargs:
+/// # echoes all toolchains on one line instead of each on a separate line
+/// cargo pando print | cut -f 1 | xargs echo
 #[derive(StructOpt, Debug)]
 #[structopt(name = "cargo pando", author = "")]
 pub struct Opts {
@@ -40,7 +48,7 @@ pub struct Opts {
 #[derive(StructOpt, Debug)]
 #[structopt(author = "")]
 pub enum ActionOpt {
-    #[structopt(name = "test")]
+    #[structopt(name = "test", author = "")]
     /// Runs cargo test on each checkout, with the applicable toolchain.
     CargoTest {
         /// Install the proper toolchain if it's not already present.
@@ -55,7 +63,7 @@ pub enum ActionOpt {
         test_args: Vec<String>,
     },
 
-    #[structopt(name = "build")]
+    #[structopt(name = "build", author = "")]
     /// Runs cargo build on each checkout, with the applicable toolchain.
     CargoBuild {
         /// Install the proper toolchain if it's not already present.
@@ -71,7 +79,7 @@ pub enum ActionOpt {
     },
 
     /// Any arbitrary cargo subcommand.
-    #[structopt(name = "cargo")]
+    #[structopt(name = "cargo", author = "")]
     CargoAny {
         /// Install the proper toolchain if it's not already present.
         #[structopt(long)]
@@ -90,7 +98,7 @@ pub enum ActionOpt {
     ///
     /// The directory will be changed to the checkout dir.
     /// Any argument named ``{}`` will be replaced by the toolchain version.
-    #[structopt(name = "each")]
+    #[structopt(name = "each", author = "")]
     Each {
         /// Install the proper toolchain if it's not already present.
         #[structopt(long)]
@@ -105,10 +113,19 @@ pub enum ActionOpt {
     },
 
     /// Copy and do nothing but print the full path of each checkout, one per line.
-    #[structopt(name = "print")]
+    /// 
+    /// Serves as a useful starting point to run a command across _all_ checkouts at once.
+    /// 
+    /// # echoes all toolchains on one line instead of each on a separate line
+    /// 
+    /// cargo pando print | cut -f 1 | xargs echo
+    #[structopt(name = "print", author = "")]
     Print,
 }
 
+// TODO: this abstraction sucks. Convert just like checkoutsource to 
+// an enum of cargo command, each, print
+// might be some way around needing scope for cargo that isn't yucky
 impl ActionOpt {
     pub fn job_count(&self) -> Option<usize> {
         match self {
@@ -119,7 +136,7 @@ impl ActionOpt {
             ActionOpt::Print => Some(0),
         }
     }
-
+   
     pub fn uses_progress_bars(&self) -> bool {
         match self {
             ActionOpt::Print => false,

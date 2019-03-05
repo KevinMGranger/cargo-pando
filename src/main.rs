@@ -152,7 +152,7 @@ impl Program {
 
         let success = if !self.action.uses_workers() {
             let print_checkout_name = |checkout: &Checkout| {
-                println!("{}", checkout.toolchain);
+                println!("{}\t{}", checkout.toolchain, checkout.working_dir.display());
                 checkout.progress.finish();
             };
             self.checkout_source
