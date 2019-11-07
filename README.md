@@ -1,9 +1,9 @@
-# cargo-pando &emsp; [![Latest Version]][crates.io] [![Rustc Version 1.32+]][rustc] [![Build Status]][travis_ci]
+# cargo-pando &emsp; [![Latest Version]][crates.io] [![Rustc Version 1.34.2+]][rustc] [![Build Status]][travis_ci]
 
 [Latest Version]: https://img.shields.io/crates/v/cargo-pando.svg
 [crates.io]: https://crates.io/crates/cargo-pando
-[Rustc Version 1.32+]: https://img.shields.io/badge/rustc-1.32+-lightgray.svg
-[rustc]: https://blog.rust-lang.org/2019/01/17/Rust-1.32.0.html
+[Rustc Version 1.34.2+]: https://img.shields.io/badge/rustc-1.34.2+-lightgray.svg
+[rustc]: https://blog.rust-lang.org/2019/05/14/Rust-1.34.2.html
 [Build Status]: https://travis-ci.com/KevinMGranger/cargo-pando.svg?branch=master
 [travis_ci]: https://travis-ci.com/KevinMGranger/cargo-pando
 
@@ -104,6 +104,20 @@ Useful if you're incrementally adding changes to a commit and you want to check 
 cargo pando --index -t stable test
 ```
 
+# Handy related commands
+
+See how much space the pando directory is taking up:
+
+```bash
+du -sh target/pando
+```
+
+Get rid of it!
+
+```bash
+rm -rf target/pando
+```
+
 # Bugs / Open Questions
 
 - How can we know what files need to be copied over?
@@ -123,8 +137,10 @@ cargo pando --index -t stable test
   - [x] cmdeach ~~/ cmdall~~ (have it print and consume it via shell / xargs!)
     - [x] document that
 - [x] heck, document everything
-- [ ] document using cargo aliases to help with common sub-commands
-- [ ] document helpful env vars
+- ~~[ ] document using cargo aliases to help with common sub-commands~~
+- ~~[ ] document helpful env vars~~
+
+(I can't remember what those last two were about. Oh well.)
 
 ## 0.4
 - [ ] start writing tests

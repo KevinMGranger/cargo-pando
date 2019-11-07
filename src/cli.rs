@@ -1,4 +1,4 @@
-use ::structopt::StructOpt;
+use ::structopt::*;
 
 /// Perform tasks concurrently over multiple copies of your repo.
 /// 
@@ -6,10 +6,12 @@ use ::structopt::StructOpt;
 /// 
 /// Note that there is no subcommand to execute _one_ command with each checkout.
 /// For that, use print, cut and xargs:
+/// 
 /// # echoes all toolchains on one line instead of each on a separate line
+/// 
 /// cargo pando print | cut -f 1 | xargs echo
 #[derive(StructOpt, Debug)]
-#[structopt(name = "cargo pando", author = "")]
+#[structopt(name = "cargo pando")]
 pub struct Opts {
     /// Check out the index of your repository.
     ///
@@ -46,9 +48,9 @@ pub struct Opts {
 }
 
 #[derive(StructOpt, Debug)]
-#[structopt(author = "")]
+#[structopt()]
 pub enum ActionOpt {
-    #[structopt(name = "test", author = "")]
+    #[structopt(name = "test")]
     /// Runs cargo test on each checkout, with the applicable toolchain.
     CargoTest {
         /// Install the proper toolchain if it's not already present.
@@ -63,7 +65,7 @@ pub enum ActionOpt {
         test_args: Vec<String>,
     },
 
-    #[structopt(name = "build", author = "")]
+    #[structopt(name = "build")]
     /// Runs cargo build on each checkout, with the applicable toolchain.
     CargoBuild {
         /// Install the proper toolchain if it's not already present.
@@ -79,7 +81,7 @@ pub enum ActionOpt {
     },
 
     /// Any arbitrary cargo subcommand.
-    #[structopt(name = "cargo", author = "")]
+    #[structopt(name = "cargo")]
     CargoAny {
         /// Install the proper toolchain if it's not already present.
         #[structopt(long)]
@@ -98,7 +100,7 @@ pub enum ActionOpt {
     ///
     /// The directory will be changed to the checkout dir.
     /// Any argument named ``{}`` will be replaced by the toolchain version.
-    #[structopt(name = "each", author = "")]
+    #[structopt(name = "each")]
     Each {
         /// Install the proper toolchain if it's not already present.
         #[structopt(long)]
@@ -119,7 +121,7 @@ pub enum ActionOpt {
     /// # echoes all toolchains on one line instead of each on a separate line
     /// 
     /// cargo pando print | cut -f 1 | xargs echo
-    #[structopt(name = "print", author = "")]
+    #[structopt(name = "print")]
     Print,
 }
 
