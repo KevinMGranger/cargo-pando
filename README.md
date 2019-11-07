@@ -25,7 +25,19 @@ There may also be backwards incompatible changes for each version.
 
 # Installation
 
-Will be easily installable from crates.io once it's more mature.
+From crates.io:
+
+```bash
+cargo install cargo-pando
+```
+
+To upgrade:
+
+```bash
+cargo install cargo-pando --force
+```
+
+Or to install a development version from this repo, off of master:
 
 ```bash
 git clone (repo url here)
@@ -33,7 +45,8 @@ cd cargo-pando
 cargo install --path .
 ```
 
-Upgrading
+Upgrading:
+
 ```bash
 git pull origin master
 cargo install --path . --force
