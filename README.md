@@ -96,6 +96,14 @@ by the progress bars, xargs can help again:
 cargo pando print | cut -f 1 | xargs -L 1 -P 2 echo the toolchain is
 ```
 
+Any long, frequently used commands can be added to your [cargo aliases](https://doc.rust-lang.org/cargo/reference/config.html). You can even do this per project!
+
+```toml
+
+[alias]
+pbt = "pando -t stable -t beta test -- --doc" # pando doc tests
+```
+
 ## Git
 
 Test the given toolchain against the _index_ (stage) of your repo.
@@ -140,7 +148,9 @@ rm -rf target/pando
 - ~~[ ] document using cargo aliases to help with common sub-commands~~
 - ~~[ ] document helpful env vars~~
 
-(I can't remember what those last two were about. Oh well.)
+~~(I can't remember what those last two were about. Oh well.)~~
+
+The first was about literal cargo aliases. Unsure about env vars still.
 
 ## 0.4
 - [ ] start writing tests
