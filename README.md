@@ -167,13 +167,16 @@ The first was about literal cargo aliases. Unsure about env vars still.
 
 ## 0.4
 - [ ] justfile and vagrant "integration" for multimachine (see branch multimachine)
+  - [ ] how do we abstract having multiple stages for provisioning as well as copying?
+  - [ ] heck, how can we balance running locally as well as on a VM / remote machine?
+    - [ ] Maybe we need to abstract the "copy" stage further.
   - [ ] setting env var for scripts to communicate stage-based progress
   - [ ] document use of `just`
-  - [ ] how do we abstract having multiple stages for provisioning as well as copying?
 - [ ] start writing tests
 - [ ] call for (and get) feedback
 - [ ] figure out what the earliest compatible rust version is
 - [ ] support allowing failures from travis.yml
+- [ ] command to list toolchains it would run with when given certain args (e.g. travis, all)
 
 ## 1.0
 - [ ] blog post
